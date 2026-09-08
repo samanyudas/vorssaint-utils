@@ -305,6 +305,7 @@ final class ShelfService: ObservableObject {
 
     func syncWithPreferences() {
         reloadAutomaticExclusions()
+        if NotchSupport.routesShelf() { hide(); hideDocked(); retractEdgePeek() }
         if AppFeature.shelf.isAvailable, UserDefaults.standard.bool(forKey: DefaultsKey.shelfEnabled) {
             syncHotkey()
             syncDragMonitor()
@@ -348,7 +349,8 @@ final class ShelfService: ObservableObject {
         let wanted = defaults.bool(forKey: DefaultsKey.shelfEnabled)
             && (defaults.bool(forKey: DefaultsKey.shelfShakeToOpen)
                 || defaults.bool(forKey: DefaultsKey.shelfDropZoneEnabled)
-                || defaults.bool(forKey: DefaultsKey.shelfEdgeDragEnabled))
+                || defaults.bool(forKey: DefaultsKey.shelfEdgeDragEnabled)
+                || NotchSupport.revealsShelfDrag())
         if wanted { startDragMonitor() } else { stopDragMonitor() }
         syncDockedShelf()
     }
@@ -434,6 +436,13 @@ final class ShelfService: ObservableObject {
                     self.beginDragGesture(with: event)
                 }
                 self.dragBeganInDock = self.dragBeganInDock || self.eventBelongsToDock(event)
+                if NotchSupport.routesShelf() {
+                    if self.automaticOpenAllowed, self.isContentDragActive() {
+                        NotchService.shared.fileDragChanged(true)
+                    }
+                    self.startDockedWatchdog()
+                    return
+                }
                 let defaults = UserDefaults.standard
                 if defaults.bool(forKey: DefaultsKey.shelfShakeToOpen) {
                     self.handleDrag(event)
@@ -455,6 +464,7 @@ final class ShelfService: ObservableObject {
     }
 
     private func stopDragMonitor() {
+        NotchService.shared.fileDragChanged(false)
         if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
         mouseMonitor = nil
         shakeSamples.removeAll()
@@ -525,6 +535,7 @@ final class ShelfService: ObservableObject {
     /// on the drag pasteboard, so a later gesture with an unseen start cannot
     /// mistake it for fresh content.
     private func closeDragGesture() {
+        if !isInternalDragActive { NotchService.shared.fileDragChanged(false) }
         sawGestureStart = false
         dragBaselineChangeCount = NSPasteboard(name: .drag).changeCount
     }
@@ -614,13 +625,13 @@ final class ShelfService: ObservableObject {
     var dockedVisible: Bool { dockedPanel?.isVisible == true }
 
     private var dockedFeatureOn: Bool {
-        AppFeature.shelf.isAvailable
+        !NotchSupport.routesShelf() && AppFeature.shelf.isAvailable
             && UserDefaults.standard.bool(forKey: DefaultsKey.shelfEnabled)
             && UserDefaults.standard.bool(forKey: DefaultsKey.shelfDropZoneEnabled)
     }
 
     private var edgeFeatureOn: Bool {
-        AppFeature.shelf.isAvailable
+        !NotchSupport.routesShelf() && AppFeature.shelf.isAvailable
             && UserDefaults.standard.bool(forKey: DefaultsKey.shelfEnabled)
             && UserDefaults.standard.bool(forKey: DefaultsKey.shelfEdgeDragEnabled)
     }
@@ -1358,6 +1369,7 @@ final class ShelfService: ObservableObject {
     }
 
     func beginInternalDrag(ids: [UUID]) {
+        NotchService.shared.fileDragChanged(true, internalDrag: true)
         activeInternalDragIDs = ids
         internalDragWasMerged = false
     }
@@ -1366,6 +1378,7 @@ final class ShelfService: ObservableObject {
         defer {
             activeInternalDragIDs = []
             internalDragWasMerged = false
+            NotchService.shared.fileDragChanged(false, internalDrag: true)
         }
         guard dropAccepted, !internalDragWasMerged else { return [] }
         return activeInternalDragIDs
@@ -2177,6 +2190,7 @@ final class ShelfService: ObservableObject {
     // MARK: - Panel
 
     func toggle() {
+        if NotchService.shared.openShelf(toggle: true) { return }
         isVisible ? hide() : summon()
     }
 
@@ -2197,6 +2211,7 @@ final class ShelfService: ObservableObject {
     func summon() {
         guard AppFeature.shelf.isAvailable,
               UserDefaults.standard.bool(forKey: DefaultsKey.shelfEnabled) else { return }
+        if NotchService.shared.openShelf() { return }
         let panel = ensurePanel()
         cancelAutoHide()
         position(panel)

@@ -226,15 +226,23 @@ final class ScreenshotSelectionController {
             if showLastRegion, let last = Self.lastRegion, last.displayID == displayID {
                 panel.overlayView.ghostRect = last.viewRect
             }
+            // Populate the retained backing store before a full-screen
+            // opaque panel can expose its black background for one frame.
+            panel.contentView?.layoutSubtreeIfNeeded()
+            panel.display()
             panels.append(panel)
-            panel.orderFrontRegardless()
         }
         guard !panels.isEmpty else {
             finish(.failed)
             return
         }
-        keyPanelUnderMouse()?.makeKey()
         installKeyMonitor()
+        // Give key ownership to only one destination. Opening and immediately
+        // resigning a full-screen key panel can flash the surrounding chrome.
+        screenCaptureOptions?.onPresentationReady?()
+        guard !finished else { return }
+        panels.forEach { $0.orderFrontRegardless() }
+        if screenCaptureOptions?.controlsInNotch != true { keyPanelUnderMouse()?.makeKey() }
         if isPickingColor
             || UserDefaults.standard.bool(forKey: DefaultsKey.screenshotLoupeStartsOn) {
             // Opt-in: the session opens with the magnifier already up,
@@ -340,7 +348,9 @@ final class ScreenshotSelectionController {
 
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            guard let self, event.window is ScreenshotOverlayPanel else { return event }
+            guard let self, event.window is ScreenshotOverlayPanel
+                    || (self.screenCaptureOptions?.controlsInNotch == true
+                        && event.window === NotchService.shared.presentationWindow) else { return event }
             if event.type == .keyUp {
                 if event.keyCode == UInt16(kVK_Space) { self.spaceIsDown = false }
                 return nil
@@ -831,6 +841,7 @@ private final class ScreenshotOverlayPanel: NSPanel {
 /// and the magnifier; owns all mouse interaction. Flipped so
 /// geometry matches image pixels (top-left origin) with no sign juggling.
 private final class ScreenshotOverlayView: NSView {
+    private var pointerHasMoved = false
     private var frozenImage: CGImage?
     fileprivate var loupeImage: CGImage?
     private var windows: [ScreenshotSupport.PickableWindow]
@@ -1011,6 +1022,7 @@ private final class ScreenshotOverlayView: NSView {
     // MARK: Mouse
 
     override func mouseMoved(with event: NSEvent) {
+        pointerHasMoved = true
         controller?.currentPointerLocation = nil
         pointerIsInside = true
         hoverPoint = convert(event.locationInWindow, from: nil)
@@ -1134,7 +1146,7 @@ private final class ScreenshotOverlayView: NSView {
     }
 
     func refreshGuideVisibility() {
-        guard let panel else {
+        guard screenCaptureOptions?.controlsInNotch != true, let panel else {
             guideHost.isHidden = true
             return
         }
@@ -1152,7 +1164,11 @@ private final class ScreenshotOverlayView: NSView {
               let controller,
               let panel
         else { return }
-        let dimAlpha: CGFloat = frozenImage == nil ? 0.18 : 0.22
+        // Opening controls in the notch should not darken the whole desktop.
+        // Keep selection feedback, without the initial full-screen dim/tint.
+        let notchChooser = screenCaptureOptions?.controlsInNotch == true
+        let dimAlpha = ScreenshotSupport.selectionDimAlpha(notchControls: notchChooser,
+                                                          isFrozen: frozenImage != nil, isDragging: isDragging)
         context.setFillColor(CGColor(gray: 0, alpha: dimAlpha))
         if selection.width > 0, selection.height > 0 {
             context.beginPath()
@@ -1169,7 +1185,7 @@ private final class ScreenshotOverlayView: NSView {
                 context.addRect(bounds)
                 context.addRect(hovered.frame)
                 context.fillPath(using: .evenOdd)
-                drawWindowHighlight(context, rect: hovered.frame)
+                if !notchChooser || pointerHasMoved { drawWindowHighlight(context, rect: hovered.frame) }
             } else {
                 context.fill(bounds)
             }

@@ -257,6 +257,10 @@ if (( TEST )); then
         Sources/Vorssaint/Core/QuitProtectionSupport.swift \
         Sources/Vorssaint/Core/QuitProtectionStrings.swift \
         Sources/Vorssaint/Core/Defaults.swift \
+        Sources/Vorssaint/Core/NotchStrings.swift \
+        Sources/Vorssaint/Services/Notch/NotchSupport.swift \
+        Sources/Vorssaint/Services/Notch/NotchVolumeKeyGate.swift \
+        Sources/Vorssaint/Services/Notch/NotchMusicSupport.swift \
         Sources/Vorssaint/Core/FeatureCatalog.swift \
         Sources/Vorssaint/Core/FeaturePresets.swift \
         Sources/Vorssaint/Core/FeatureHubStrings.swift \
@@ -426,6 +430,8 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Uninstall/UninstallerSupport.swift \
         Sources/Vorssaint/Services/ManagedDownloads/WhatsAppDownloadSupport.swift \
         Tests/MetricsTests.swift \
+        Tests/NotchTests.swift \
+        Tests/NotchVolumeKeyTests.swift \
         Tests/RecentCaptureStoreTests.swift \
         Tests/RecorderPresetImageStoreTests.swift \
         Tests/SpeedTestTests.swift \

@@ -168,6 +168,7 @@ final class FeatureRuntime: ObservableObject {
     private func finishAvailabilityChange() {
         revision += 1
         CommandBarService.shared.noteHubChange()
+        if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
     }
 
     /// What each feature must re-evaluate when its availability (or a
@@ -254,6 +255,7 @@ final class FeatureRuntime: ObservableObject {
         },
         .cameraPreview: { CameraPreviewService.shared.syncWithPreferences() },
         .radialMenu: { RadialMenuService.shared.syncWithPreferences() },
+        .notch: { NotchService.shared.syncWithPreferences() },
         .scratchpad: { ScratchpadService.shared.syncWithPreferences() },
         .commandBar: { CommandBarService.shared.syncWithPreferences() },
         .cleaner: {

@@ -645,6 +645,39 @@ enum DefaultsKey {
     static let snippetLibraryEnabled = "snippetLibraryEnabled"
     static let snippetLibraryShortcut = "snippetLibraryShortcut"
 
+    // Optional top-of-screen workspace and activity presentations.
+    static let notchShowPlayingMusic = "notchShowPlayingMusic"
+    static let notchIdleContent = "notchIdleContent"
+    static let notchHiddenControls = "notchHiddenControls"
+    static let notchControlOrder = "notchControlOrder"
+    static let notchSize = "notchSize"
+    static let notchCustomWidth = "notchCustomWidth"
+    static let notchCustomHeight = "notchCustomHeight"
+    static let notchHapticFeedback = "notchHapticFeedback"
+    static let notchShelf = "notchShelf"
+    static let notchDragReveal = "notchDragReveal"
+    static let notchCaptureControls = "notchCaptureControls"
+    static let notchQuickPanel = "notchQuickPanel"
+    static let notchAppPanel = "notchAppPanel"
+    static let notchHoverExpands = "notchHoverExpands"
+    static let notchEnabled = "notchEnabled"
+    static let notchDisplay = "notchDisplay"
+    static let notchOpenOnHover = "notchOpenOnHover"
+    static let notchHiddenModules = "notchHiddenModules"
+    static let notchModuleOrder = "notchModuleOrder"
+    static let notchVolume = "notchVolume"
+    static let notchBrightness = "notchBrightness"
+    static let notchBattery = "notchBattery"
+    static let notchClipboard = "notchClipboard"
+    static let notchClipboardWindow = "notchClipboardWindow"
+    static let notchCapture = "notchCapture"
+    // Legacy backup key. Resting content is now selected explicitly by notchIdleContent.
+    static let notchMusicActivity = "notchMusicActivity"
+    static let notchShowInCaptures = "notchShowInCaptures"
+    // Legacy inverse preference; the explicit visibility switch supersedes it.
+    static let notchHideInCaptures = "notchHideInCaptures"
+    static let panelControlNotch = "panelControlNotch"
+
     // Radial menu: a wheel of actions on a shortcut.
     static let radialMenuEnabled = "radialMenuEnabled"
     static let radialMenuShortcut = "radialMenuShortcut"
@@ -1026,6 +1059,35 @@ enum Defaults {
         DefaultsKey.textSnippetsEnabled: false,
         DefaultsKey.snippetLibraryEnabled: false,
         DefaultsKey.snippetLibraryShortcut: GlobalShortcut.snippetLibraryDefault.storageValue,
+        DefaultsKey.notchShowPlayingMusic: true,
+        DefaultsKey.notchIdleContent: NotchIdleContent.none.rawValue,
+        DefaultsKey.notchHiddenControls: "mixer,commandBar",
+        DefaultsKey.notchControlOrder: "",
+        DefaultsKey.notchSize: NotchSize.compact.rawValue,
+        DefaultsKey.notchCustomWidth: NotchSize.defaultWidth,
+        DefaultsKey.notchCustomHeight: NotchSize.defaultHeight,
+        DefaultsKey.notchHapticFeedback: false,
+        DefaultsKey.notchShelf: true,
+        DefaultsKey.notchDragReveal: true,
+        DefaultsKey.notchCaptureControls: true,
+        DefaultsKey.notchQuickPanel: true,
+        DefaultsKey.notchAppPanel: true,
+        DefaultsKey.notchHoverExpands: false,
+        DefaultsKey.notchEnabled: false,
+        DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,
+        DefaultsKey.notchOpenOnHover: true,
+        DefaultsKey.notchHiddenModules: "",
+        DefaultsKey.notchModuleOrder: "",
+        DefaultsKey.notchVolume: true,
+        DefaultsKey.notchBrightness: true,
+        DefaultsKey.notchBattery: true,
+        DefaultsKey.notchClipboard: false,
+        DefaultsKey.notchClipboardWindow: false,
+        DefaultsKey.notchCapture: false,
+        DefaultsKey.notchMusicActivity: false,
+        DefaultsKey.notchShowInCaptures: true,
+        DefaultsKey.notchHideInCaptures: false,
+        DefaultsKey.panelControlNotch: true,
         DefaultsKey.radialMenuEnabled: false,
         DefaultsKey.radialMenuShortcut: GlobalShortcut.radialMenuDefault.storageValue,
         DefaultsKey.radialMenuAtPointer: true,

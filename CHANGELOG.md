@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Summary
+An optional black notch brings audio, tools, captures and system details together, with adjustable sizing, a narrower compact layout, smoother transitions and optional trackpad feedback.
+
+### Added
+- Optional black notch with adjustable size, music, per-app audio, capture tools, file drops, system details, customizable shortcuts, smoother transitions and optional trackpad feedback.
+
 ## [3.3.5] - 2026-09-06
 
 ### Summary

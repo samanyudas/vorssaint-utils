@@ -150,6 +150,11 @@ enum ScreenshotSupport {
         isAvailable(selected.feature)
     }
 
+    static func selectionDimAlpha(notchControls: Bool, isFrozen: Bool, isDragging: Bool) -> CGFloat {
+        if notchControls { return isDragging ? 0.18 : 0 }
+        return isFrozen ? 0.22 : 0.18
+    }
+
     static func captureGuideIsVisible(pointerOnDisplay: Bool,
                                       selectionInProgress: Bool,
                                       capturePending: Bool) -> Bool {

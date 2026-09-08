@@ -46,6 +46,17 @@ enum PanelMetricColor {
     }
 }
 
+private struct NotchPresentationKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var notchPresentation: Bool {
+        get { self[NotchPresentationKey.self] }
+        set { self[NotchPresentationKey.self] = newValue }
+    }
+}
+
 enum PanelSurface {
     static func baseFill(for scheme: ColorScheme) -> Color {
         scheme == .light ? Color.white.opacity(0.68) : Color.black.opacity(0.42)
@@ -120,13 +131,14 @@ extension View {
 
 private struct PanelCardModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.notchPresentation) private var notchPresentation
 
     func body(content: Content) -> some View {
         content
             .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(PanelSurface.cardFill(for: colorScheme))
+                    .fill(notchPresentation ? .black : PanelSurface.cardFill(for: colorScheme))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -137,11 +149,20 @@ private struct PanelCardModifier: ViewModifier {
 
 private struct PanelGlassSurface: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.notchPresentation) private var notchPresentation
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @AppStorage(DefaultsKey.liquidGlassEnabled) private var liquidGlassEnabled = false
     let cornerRadius: CGFloat
 
     var body: some View {
+        if notchPresentation {
+            RoundedRectangle(cornerRadius: cornerRadius).fill(.black)
+        } else {
+            themedSurface
+        }
+    }
+
+    @ViewBuilder private var themedSurface: some View {
 #if compiler(>=6.2)
         if #available(macOS 26.0, *), liquidGlassEnabled, !reduceTransparency {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
