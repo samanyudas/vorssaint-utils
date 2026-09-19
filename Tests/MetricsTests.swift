@@ -12285,6 +12285,15 @@ struct MetricsTests {
                "App Switcher icon-row mode keeps one row entry per app")
         let windowlessApps = [SwitcherItem.appOnly(appName: "Gamma", pid: 303),
                               SwitcherItem.appOnly(appName: "Delta", pid: 404)]
+        let dividerViewSource = switcherCardSource
+            .replacingOccurrences(of: #"(?s)/\*.*?\*/|//[^\n]*"#, with: "", options: .regularExpression)
+            .filter { !$0.isWhitespace }
+        expect(dividerViewSource.contains("SwitcherSupport.windowlessAppDividerPIDs("),
+               "the switcher view uses the windowless-app boundary decision")
+        let dividerPresentation = sourceBody(of: dividerViewSource, from: ".separatorColor", to: ".onHover")
+        expect(dividerPresentation.contains(".allowsHitTesting(false)")
+               && dividerPresentation.contains(".accessibilityHidden(true)"),
+               "the switcher renders a system-colored windowless-app divider without pointer or accessibility targets")
         expect(SwitcherSupport.windowlessAppDividerPIDs(items: []) == [],
                "an empty app row has no windowless divider")
         expect(SwitcherSupport.windowlessAppDividerPIDs(items: groupedSwitcherItems) == []
