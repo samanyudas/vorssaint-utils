@@ -18,7 +18,9 @@ struct NotchClipboardView: View {
     @State private var pinnedOnly = false
     @FocusState private var searching: Bool
     private var text: ClipboardFeatureStrings { FeatureStrings.clipboard(l10n.language) }
-    private static let cardWidth: CGFloat = 168
+    private var cardWidth: CGFloat {
+        AppFeature.screenshot.isAvailable && entries.contains { $0.kind == .image } ? 200 : 168
+    }
     private static let searchHeight: CGFloat = 36
 
     private var entries: [ClipboardHistoryEntry] {
@@ -76,10 +78,10 @@ struct NotchClipboardView: View {
             } else {
                 let height = max(0, size.height - Self.searchHeight - NotchLayout.rowSpacing)
                 let rows = NotchLayout.railRows(count: entries.count,
-                                                perRow: NotchLayout.railCapacity(width: size.width, itemWidth: Self.cardWidth, spacing: 8),
+                                                perRow: NotchLayout.railCapacity(width: size.width, itemWidth: cardWidth, spacing: 8),
                                                 rowHeight: 96, spacing: 8, height: height)
                 let cardHeight = (height - CGFloat(rows - 1) * 8) / CGFloat(rows)
-                NotchRail(items: entries, rows: rows, itemWidth: Self.cardWidth, width: size.width) { entry in
+                NotchRail(items: entries, rows: rows, itemWidth: cardWidth, width: size.width) { entry in
                     card(entry).frame(height: cardHeight)
                 }
             }
@@ -111,6 +113,9 @@ struct NotchClipboardView: View {
                 Text(entry.copiedAt, style: .time)
                     .font(.system(size: 9.5)).foregroundStyle(.tertiary).lineLimit(1)
                 Spacer(minLength: 0)
+                if entry.kind == .image, AppFeature.screenshot.isAvailable {
+                    NotchIconButton(symbol: "pencil", title: text.edit) { history.editImage(entry) }
+                }
                 NotchIconButton(symbol: copiedID == entry.id ? "checkmark" : "doc.on.doc",
                                 title: copiedID == entry.id ? text.copied : text.copy) { copy(entry) }
                 NotchIconButton(symbol: entry.isPinned ? "pin.fill" : "pin",
