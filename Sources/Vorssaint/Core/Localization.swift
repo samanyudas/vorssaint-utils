@@ -166,6 +166,8 @@ struct Strings {
     let keepAwakeEndsIn: String        // + remaining
     let keepAwakeUntilDisabled: String
     let keepAwakeNormalRules: String
+    let keepAwakeUntilLabel: String
+    let keepAwakeUntilStart: String
     let keepAwakeOptions: String
     let keepAwakeMouseJiggle: String
     let keepAwakeMouseJiggleCaption: String
@@ -364,6 +366,8 @@ struct Strings {
     let dockPreviewOpenDelayCaption: String
     let dockPreviewQuitAppOnClose: String
     let dockPreviewQuitAppOnCloseCaption: String
+    let dockPreviewKeepDockVisible: String
+    let dockPreviewKeepDockVisibleCaption: String
     let dockPreviewOrderByCreation: String
     let dockPreviewOrderByCreationCaption: String
     let dockClickMinimize: String
@@ -845,6 +849,8 @@ struct Strings {
 
     // MARK: Panel — network
     let networkSection: String
+    let networkIPAddresses: String
+    let networkLocalIP: String
     let networkDownload: String
     let networkUpload: String
     let networkThisSession: String
@@ -1244,6 +1250,8 @@ extension Strings {
         keepAwakeEndsIn: "Termina em",
         keepAwakeUntilDisabled: "Ativo até você desativar",
         keepAwakeNormalRules: "O Mac segue as regras normais de energia",
+        keepAwakeUntilLabel: "Até",
+        keepAwakeUntilStart: "Iniciar",
         keepAwakeOptions: "Opções",
         keepAwakeMouseJiggle: "Mover cursor levemente",
         keepAwakeMouseJiggleCaption: "Durante uma sessão, move o cursor um pouco no intervalo escolhido.",
@@ -1431,6 +1439,8 @@ extension Strings {
         dockPreviewOpenDelayCaption: "Quanto tempo o ponteiro precisa ficar sobre um ícone antes de o painel abrir.",
         dockPreviewQuitAppOnClose: "Encerrar o app com o botão ×",
         dockPreviewQuitAppOnCloseCaption: "No Dock Preview, × encerra o app inteiro em vez de fechar apenas aquela janela.",
+        dockPreviewKeepDockVisible: "Manter Dock visível (experimental)",
+        dockPreviewKeepDockVisibleCaption: "Suspende o ocultamento automático enquanto o preview está aberto e restaura ao sair. Pode reajustar janelas. Se o app for interrompido, reabra-o para restaurar o Dock.",
         dockPreviewOrderByCreation: "Ordenar janelas por criação",
         dockPreviewOrderByCreationCaption: "Mostra primeiro as janelas mais antigas em vez das usadas mais recentemente.",
         dockClickMinimize: "Clicar no Dock minimiza",
@@ -1890,6 +1900,8 @@ extension Strings {
         betaFeatureWarning: "Beta. Você pode encontrar alguns bugs.",
 
         networkSection: "Rede",
+        networkIPAddresses: "Endereços IP",
+        networkLocalIP: "IPv4 local",
         networkDownload: "Download",
         networkUpload: "Upload",
         networkThisSession: "Nesta sessão",
@@ -2277,6 +2289,8 @@ extension Strings {
         keepAwakeEndsIn: "Ends in",
         keepAwakeUntilDisabled: "Active until you turn it off",
         keepAwakeNormalRules: "The Mac follows its normal energy rules",
+        keepAwakeUntilLabel: "Until",
+        keepAwakeUntilStart: "Start",
         keepAwakeOptions: "Options",
         keepAwakeMouseJiggle: "Move pointer slightly",
         keepAwakeMouseJiggleCaption: "During a session, moves the pointer a little at the chosen interval.",
@@ -2464,6 +2478,8 @@ extension Strings {
         dockPreviewOpenDelayCaption: "How long the pointer has to rest on an icon before its panel opens.",
         dockPreviewQuitAppOnClose: "Quit the app with the × button",
         dockPreviewQuitAppOnCloseCaption: "In Dock Preview, × quits the whole app instead of closing only that window.",
+        dockPreviewKeepDockVisible: "Keep Dock visible (experimental)",
+        dockPreviewKeepDockVisibleCaption: "Pauses auto-hide while the preview is open and restores it when you leave. May resize windows. If the app is interrupted, reopen it to restore the Dock.",
         dockPreviewOrderByCreation: "Order windows by creation time",
         dockPreviewOrderByCreationCaption: "Show older windows first instead of the ones you used most recently.",
         dockClickMinimize: "Click the Dock icon to minimize",
@@ -2923,6 +2939,8 @@ extension Strings {
         betaFeatureWarning: "Beta. You may run into some bugs.",
 
         networkSection: "Network",
+        networkIPAddresses: "IP addresses",
+        networkLocalIP: "Local IPv4",
         networkDownload: "Download",
         networkUpload: "Upload",
         networkThisSession: "This session",

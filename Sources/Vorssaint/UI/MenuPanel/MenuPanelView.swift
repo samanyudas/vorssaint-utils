@@ -187,7 +187,7 @@ struct MenuPanelView: View {
                 .environment(\.notchPresentation, true)
                 .environment(\.colorScheme, .dark)
             }
-            .frame(width: size.width, height: max(80, size.height - 96))
+            .frame(width: size.width, height: max(0, size.height - 96))
             footer
         }
         .frame(width: size.width, height: size.height, alignment: .top)
@@ -2474,6 +2474,7 @@ struct KeepAwakeCard: View {
     @AppStorage(DefaultsKey.keepAwakeMouseJiggleInterval) private var keepAwakeMouseJiggleInterval = 5
     @State private var optionsExpanded = false
     @State private var automationExpanded = false
+    @State private var untilTime = Date()
     var collapsible = true
 
     var body: some View {
@@ -2506,6 +2507,24 @@ struct KeepAwakeCard: View {
                         Spacer()
                         DurationPicker(selection: $defaultDuration)
                     }
+
+                    HStack {
+                        Text(l10n.s.keepAwakeUntilLabel)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        DatePicker("", selection: $untilTime, displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                            .datePickerStyle(.stepperField)
+                            .controlSize(.small)
+                            .fixedSize()
+                        Button(l10n.s.keepAwakeUntilStart) {
+                            awake.activate(until: KeepAwakeAutomationSupport.resolvedUntilDate(picked: untilTime, now: Date()))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .font(.system(size: 10))
+                    }
                 }
 
                 optionsDisclosure
@@ -2525,6 +2544,7 @@ struct KeepAwakeCard: View {
             keepAwakeIconTint = Defaults.sanitizedKeepAwakeIconTint(keepAwakeIconTint).rawValue
             keepAwakeActiveIcon = Defaults.sanitizedKeepAwakeActiveIcon(keepAwakeActiveIcon).rawValue
             keepAwakeMouseJiggleInterval = Defaults.sanitizedKeepAwakeMouseJiggleInterval(keepAwakeMouseJiggleInterval)
+            untilTime = Date().addingTimeInterval(3600)
         }
     }
 

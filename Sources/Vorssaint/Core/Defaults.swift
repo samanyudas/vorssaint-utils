@@ -106,6 +106,8 @@ enum DefaultsKey {
     static let switcherCurrentDisplayOnly = "switcherCurrentDisplayOnly" // list only windows on the display under the pointer (issue #1391)
     static let minimalWindowPreviews = "minimalWindowPreviews"
     static let dockPreviewEnabled = "dockPreviewEnabled"
+    static let dockPreviewKeepDockVisible = "dockPreviewKeepDockVisible"
+    static let dockPreviewRestoreAutohide = "dockPreviewRestoreAutohide" // local crash recovery; never backed up
     static let dockPreviewCurrentSpaceOnly = "dockPreviewCurrentSpaceOnly"
     static let dockPreviewBackgroundOpacity = "dockPreviewBackgroundOpacity" // how solid the preview panel's material is drawn (DockPreviewSupport.backgroundOpacityRange)
     static let dockPreviewOpenDelay = "dockPreviewOpenDelay" // milliseconds the cursor must rest on a Dock icon before its panel opens (DockPreviewSupport.openDelayMillisecondsRange)
@@ -390,6 +392,7 @@ enum DefaultsKey {
     static let monitorNetSpeed = "monitorNetSpeed"
     static let monitorNetApps = "monitorNetApps"
     static let monitorNetTotals = "monitorNetTotals"
+    static let monitorNetAddresses = "monitorNetAddresses"
     static let monitorNetTest = "monitorNetTest"
     static let monitorDiskUsage = "monitorDiskUsage"
     static let monitorDiskActivity = "monitorDiskActivity"
@@ -1035,6 +1038,7 @@ enum Defaults {
         DefaultsKey.minimalWindowPreviews: false,
         DefaultsKey.dockPreviewEnabled: false,
         DefaultsKey.dockPreviewCurrentSpaceOnly: false,
+        DefaultsKey.dockPreviewKeepDockVisible: false,
         DefaultsKey.dockPreviewBackgroundOpacity: 1.0,
         DefaultsKey.dockPreviewOpenDelay: DockPreviewSupport.defaultOpenDelayMilliseconds,
         DefaultsKey.dockPreviewQuitAppOnClose: false,
@@ -1340,6 +1344,7 @@ enum Defaults {
         DefaultsKey.monitorNetSpeed: true,
         DefaultsKey.monitorNetApps: true,
         DefaultsKey.monitorNetTotals: true,
+        DefaultsKey.monitorNetAddresses: true,
         DefaultsKey.monitorNetTest: true,
         DefaultsKey.monitorDiskUsage: true,
         DefaultsKey.monitorDiskActivity: true,
