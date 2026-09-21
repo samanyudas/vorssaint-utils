@@ -532,6 +532,10 @@ def main():
           + "func display(_ item: QuickLauncherItem) -> (String, Bool) { (icon(for: item), isActive(item)) }\n}\n}\n")
 
     preview = "Sources/Vorssaint/Services/QuickTools/ScreenshotQuickPreviewController.swift"
+    write("ScreenshotShareCompletion.swift", "import Foundation\n"
+          + "extension ScreenshotShareCompletionTests {\nfinal class Controller: State {\n"
+          + declaration(preview, "    private func performShare(").replace("private func", "func", 1)
+          + "}\n}\n")
     write("ScreenshotPreviewHover.swift", "import Foundation\n"
           + "extension ScreenshotPreviewHoverTests {\nfinal class Controller: State {\n"
           + "".join(declaration(preview, prefix).replace("private func", "func", 1)

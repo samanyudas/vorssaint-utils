@@ -58,6 +58,22 @@ enum ScreenshotFeatureTests {
         suite.expect(successfulCopy && linkEvents == [copyRecord.url.absoluteString, "dismiss"],
                      "a successful link copy dismisses the preview only after copying the URL")
 
+        let retryCaptureID = UUID()
+        var copyRetry = ScreenshotLinkCopyRetry()
+        copyRetry.remember(copyRecord, for: retryCaptureID)
+        suite.expect(copyRetry.record(for: retryCaptureID, availableRecords: [copyRecord]) == copyRecord,
+                     "a clipboard failure offers the same uploaded link for retry")
+        suite.expect(copyRetry.record(for: UUID(), availableRecords: [copyRecord]) == nil,
+                     "a new screenshot does not retry the previous screenshot's link")
+        suite.expect(copyRetry.record(for: retryCaptureID, availableRecords: []) == nil,
+                     "a revoked link cannot be copied by the upload shortcut")
+        suite.expect(copyRetry.record(for: retryCaptureID, availableRecords: [copyRecord],
+                                      now: copyRecord.expiresAt) == nil,
+                     "an expired link cannot be copied by the upload shortcut")
+        copyRetry.clear()
+        suite.expect(copyRetry.record(for: retryCaptureID, availableRecords: [copyRecord]) == nil,
+                     "successful copying clears the pending retry")
+
         let uploadDefaultsName = "com.vorssaint.tests.screenshot-upload.\(UUID().uuidString)"
         let uploadDefaults = UserDefaults(suiteName: uploadDefaultsName)!
         defer { uploadDefaults.removePersistentDomain(forName: uploadDefaultsName) }

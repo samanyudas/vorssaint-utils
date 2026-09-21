@@ -20,6 +20,8 @@ final class ScreenshotService: ObservableObject {
     @Published private(set) var uploadShortcutRegistrationFailed = false
     private let uploadHotkey = QuickToolHotkey(id: 61)
     private var uploadingLatestCapture = false
+    private var latestCaptureID = UUID()
+    private var linkCopyRetry = ScreenshotLinkCopyRetry()
 
     private let lastCaptureHotkey = QuickToolHotkey(id: 22)
     private let fullScreenHotkey = QuickToolHotkey(id: 23)
@@ -97,7 +99,9 @@ final class ScreenshotService: ObservableObject {
         }
         fullScreenHotkey.onPress = { [weak self] in self?.captureFullScreen() }
         lastCaptureHotkey.onPress = { [weak self] in self?.openLastCapture() }
-        uploadHotkey.onPress = { [weak self] in self?.uploadLastCapture() }
+        uploadHotkey.onPress = { [weak self] in
+            Task { @MainActor [weak self] in self?.uploadLastCapture() }
+        }
         clipboardHotkey.onPress = { [weak self] in self?.openClipboardImage() }
     }
 
@@ -410,6 +414,8 @@ final class ScreenshotService: ObservableObject {
     /// the captures that open straight in the editor, where no preview button
     /// exists to reach for.
     private func route(_ capture: ScreenshotSelectionController.Capture) {
+        latestCaptureID = UUID()
+        linkCopyRetry.clear()
         preview?.close()
         RecentCaptureService.shared.recordScreenshot(capture)
         if ScreenshotSharingSupport.retainsLatestCapture() {
@@ -473,7 +479,7 @@ final class ScreenshotService: ObservableObject {
             },
             share: { [weak self] duration, completion in
                 guard let self else {
-                    completion(nil)
+                    Task { @MainActor in completion(nil) }
                     return
                 }
                 self.shareDirect(capture, duration: duration, completion: completion)
@@ -490,27 +496,47 @@ final class ScreenshotService: ObservableObject {
         editor.show()
     }
 
+    @MainActor
     private func uploadLastCapture() {
         guard AppFeature.screenshot.isAvailable,
               ScreenshotSharingSupport.uploadShortcutEnabled(),
               !uploadingLatestCapture else { return }
+        if let record = linkCopyRetry.record(for: latestCaptureID,
+                                             availableRecords: ScreenshotShareService.shared.records) {
+            copyUploadedLink(record, captureID: latestCaptureID, preview: preview)
+            return
+        }
         guard let capture = ScreenshotLastCaptureStore.load() else {
             QuickToolHUD.show(icon: "camera.viewfinder", message: strings.lastCaptureMissing)
             return
         }
         let uploadingPreview = preview
+        let captureID = latestCaptureID
         uploadingLatestCapture = true
         QuickToolHUD.show(icon: "link", message: strings.sharingHUD)
         shareDirect(capture, duration: .saved()) { [weak self, weak uploadingPreview] record in
             guard let self else { return }
             self.uploadingLatestCapture = false
             guard let record else { return }
-            let copied = ScreenshotSharingSupport.copyLink(
-                record, using: ScreenshotShareService.shared.copy,
-                dismiss: { uploadingPreview?.close() })
-            QuickToolHUD.show(icon: "link", message: copied
-                ? self.strings.sharedHUD : self.strings.shareFailedHUD)
+            self.copyUploadedLink(record, captureID: captureID, preview: uploadingPreview)
         }
+    }
+
+    @MainActor
+    private func copyUploadedLink(_ record: ScreenshotShareRecord, captureID: UUID,
+                                  preview: ScreenshotQuickPreviewController?) {
+        let copied = ScreenshotSharingSupport.copyLink(
+            record, using: ScreenshotShareService.shared.copy,
+            dismiss: { preview?.close() })
+        if captureID == latestCaptureID {
+            if copied {
+                linkCopyRetry.clear()
+            } else {
+                linkCopyRetry.remember(record, for: captureID)
+            }
+        }
+        QuickToolHUD.show(icon: "link", message: copied
+            ? strings.sharedHUD : strings.linkCopyFailedHUD)
     }
 
     private func openLastCapture() {

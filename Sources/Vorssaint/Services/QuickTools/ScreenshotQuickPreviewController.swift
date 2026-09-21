@@ -35,7 +35,7 @@ final class ScreenshotQuickPreviewController {
     /// their buttons out. Empty means the action failed entirely.
     private let action: (Action) -> Set<Action>
     private let share: (ScreenshotShareDuration,
-                        @escaping (ScreenshotShareRecord?) -> Void) -> Void
+                        @escaping @MainActor (ScreenshotShareRecord?) -> Void) -> Void
     private let onClose: () -> Void
     private let model = ScreenshotQuickPreviewModel()
     private var panel: ScreenshotQuickPreviewPanel?
@@ -58,7 +58,7 @@ final class ScreenshotQuickPreviewController {
          defaultAction: ScreenshotDefaultAction,
          action: @escaping (Action) -> Set<Action>,
          share: @escaping (ScreenshotShareDuration,
-                           @escaping (ScreenshotShareRecord?) -> Void) -> Void,
+                           @escaping @MainActor (ScreenshotShareRecord?) -> Void) -> Void,
          onClose: @escaping () -> Void) {
         self.capture = capture
         self.strings = strings
@@ -273,14 +273,11 @@ final class ScreenshotQuickPreviewController {
                 self.scheduleAutoDismiss()
                 return
             }
-            Task { @MainActor [weak self] in
-                guard let self, !self.closed else { return }
-                if self.copyLinkAndClose(record) { return }
-                self.model.sharedRecord = record
-                self.autoDismissDuration = 30
-                self.resizePanel(showingLink: true)
-                self.scheduleAutoDismiss()
-            }
+            if self.copyLinkAndClose(record) { return }
+            self.model.sharedRecord = record
+            self.autoDismissDuration = 30
+            self.resizePanel(showingLink: true)
+            self.scheduleAutoDismiss()
         }
     }
 
@@ -302,6 +299,7 @@ final class ScreenshotQuickPreviewController {
         if copied {
             QuickToolHUD.show(icon: "link", message: strings.sharedHUD)
         } else {
+            QuickToolHUD.show(icon: "link", message: strings.linkCopyFailedHUD)
             NSSound.beep()
         }
         return copied
