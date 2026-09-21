@@ -273,12 +273,14 @@ final class ScreenshotQuickPreviewController {
                 self.scheduleAutoDismiss()
                 return
             }
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+            Task { @MainActor [weak self] in
+                guard let self, !self.closed else { return }
+                if self.copyLinkAndClose(record) { return }
                 self.model.sharedRecord = record
+                self.autoDismissDuration = 30
+                self.resizePanel(showingLink: true)
+                self.scheduleAutoDismiss()
             }
-            self.autoDismissDuration = 30
-            self.resizePanel(showingLink: true)
-            self.scheduleAutoDismiss()
         }
     }
 
@@ -288,13 +290,21 @@ final class ScreenshotQuickPreviewController {
         dismissWork = nil
         Task { @MainActor [weak self] in
             guard let self, !self.closed else { return }
-            if ScreenshotShareService.shared.copy(record.url) {
-                QuickToolHUD.show(icon: "link", message: self.strings.sharedHUD)
-            } else {
-                NSSound.beep()
-            }
-            self.scheduleAutoDismiss()
+            if !self.copyLinkAndClose(record) { self.scheduleAutoDismiss() }
         }
+    }
+
+    @MainActor
+    private func copyLinkAndClose(_ record: ScreenshotShareRecord) -> Bool {
+        let copied = ScreenshotSharingSupport.copyLink(
+            record, using: ScreenshotShareService.shared.copy,
+            dismiss: { self.close() })
+        if copied {
+            QuickToolHUD.show(icon: "link", message: strings.sharedHUD)
+        } else {
+            NSSound.beep()
+        }
+        return copied
     }
 
     private func deleteSharedLink() {
@@ -615,12 +625,15 @@ private struct ScreenshotQuickPreviewView: View {
                 }
             }
             .frame(width: 22, height: 18)
+        } primaryAction: {
+            share(.saved())
         }
         .menuStyle(.button)
         .buttonStyle(.bordered)
         .controlSize(.small)
         .disabled(model.sharing)
-        .screenshotSafeHelp(model.sharing ? strings.sharingHUD : strings.shareButton)
+        .screenshotSafeHelp(model.sharing ? strings.sharingHUD
+            : "\(strings.shareButton) · \(ScreenshotShareDuration.saved().title(strings))")
         .accessibilityLabel(strings.shareButton)
     }
 
