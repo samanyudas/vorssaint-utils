@@ -38,7 +38,11 @@ struct MetricsTests {
                 ScreenshotWatermarkTests.run(suite)
                 ScreenshotFeatureTests.run(suite)
             }),
-            ("recorder", { RecorderFeatureTests.run(suite) }),
+            ("recorder", {
+                RecorderFeatureTests.run(suite)
+                RecorderExportSpeedTests.run(suite)
+                RecorderExportRenderingTests.run(suite)
+            }),
             ("command-bar", { CommandBarFeatureTests.run(suite) }),
             ("notch", {
                 NotchTests.run(suite)
@@ -47,7 +51,10 @@ struct MetricsTests {
             }),
             ("switcher-model", { SwitcherModelFeatureTests.run(suite) }),
             ("features", { FeatureCatalogTests.run(suite) }),
-            ("utilities", { UtilitiesFeatureTests.run(suite) }),
+            ("utilities", {
+                UtilitiesFeatureTests.run(suite)
+                PortManagerRefreshTests.run(suite)
+            }),
             ("settings", {
                 SettingsFeatureTests.run(suite)
                 SettingsWindowTests.run { suite.expect($0, $1) }
