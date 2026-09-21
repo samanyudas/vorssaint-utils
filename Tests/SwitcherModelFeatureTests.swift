@@ -145,6 +145,49 @@ enum SwitcherModelFeatureTests {
                    == ["display|port"],
                    "the recheck runs once and keeps later verdicts")
 
+            migrationDefaults.set("microphone,panel", forKey: DefaultsKey.notchHiddenControls)
+            Defaults.hideScratchpadControlOnce(in: migrationDefaults)
+            suite.expect(migrationDefaults.string(forKey: DefaultsKey.notchHiddenControls)
+                   == "microphone,panel,scratchpad"
+                   && migrationDefaults.bool(forKey: DefaultsKey.notchScratchpadControlHidden),
+                   "a hidden-controls list saved before the Scratchpad tile existed hides it once")
+            migrationDefaults.set("microphone,panel", forKey: DefaultsKey.notchHiddenControls)
+            Defaults.hideScratchpadControlOnce(in: migrationDefaults)
+            suite.expect(migrationDefaults.string(forKey: DefaultsKey.notchHiddenControls) == "microphone,panel",
+                   "showing the Scratchpad tile afterwards is kept")
+            migrationDefaults.removeObject(forKey: DefaultsKey.notchScratchpadControlHidden)
+            migrationDefaults.removeObject(forKey: DefaultsKey.notchHiddenControls)
+            Defaults.hideScratchpadControlOnce(in: migrationDefaults)
+            suite.expect(migrationDefaults.object(forKey: DefaultsKey.notchHiddenControls) == nil
+                   && migrationDefaults.bool(forKey: DefaultsKey.notchScratchpadControlHidden),
+                   "a setup that never customized the controls keeps the registered default")
+            let hiddenControlsKey = DefaultsKey.notchHiddenControls
+            let scratchpadMigrationKey = DefaultsKey.notchScratchpadControlHidden
+            suite.expect(SettingsBackupSupport.exportKeys().contains(scratchpadMigrationKey),
+                   "the migration marker travels with a later choice to show the Scratchpad tile")
+            suite.expect(!SettingsBackupSupport.valueLooksRight(scratchpadMigrationKey, "true"),
+                   "an imported migration marker must be a boolean")
+            for shown in [false, true] {
+                migrationDefaults.set(shown ? "microphone,panel" : "microphone,panel,scratchpad",
+                                      forKey: hiddenControlsKey)
+                let backup = SettingsBackupSupport.payload(appVersion: "3.4.0") {
+                    migrationDefaults.object(forKey: $0)
+                }
+                let restored = SettingsBackupSupport.sanitizedSettings(from: backup) ?? [:]
+                for key in SettingsBackupSupport.exportKeys() { migrationDefaults.removeObject(forKey: key) }
+                for (key, value) in restored { migrationDefaults.set(value, forKey: key) }
+                Defaults.hideScratchpadControlOnce(in: migrationDefaults)
+                suite.expect(migrationDefaults.string(forKey: hiddenControlsKey)?.contains("scratchpad") == !shown,
+                       "restoring a current backup preserves the explicit Scratchpad visibility choice")
+            }
+            // A restore clears every exportable key before applying the backup.
+            // Old backups have a controls list but no migration marker.
+            for key in SettingsBackupSupport.exportKeys() { migrationDefaults.removeObject(forKey: key) }
+            migrationDefaults.set("microphone,panel", forKey: hiddenControlsKey)
+            Defaults.hideScratchpadControlOnce(in: migrationDefaults)
+            suite.expect(migrationDefaults.string(forKey: hiddenControlsKey) == "microphone,panel,scratchpad",
+                   "an old backup restored after the first launch still hides the new Scratchpad tile")
+
             migrationDefaults.removeObject(
                 forKey: DefaultsKey.unifiedScreenCaptureShortcutMigrated)
             migrationDefaults.set(false, forKey: DefaultsKey.screenshotShortcutEnabled)
@@ -1554,16 +1597,16 @@ enum SwitcherModelFeatureTests {
         // decision above is made consciously, never by omission.
         let releasePlist = NSDictionary(contentsOfFile: "Resources/Info.plist")
         let plistVersion = (releasePlist?["CFBundleShortVersionString"] as? String) ?? ""
-        suite.expect(plistVersion == "3.4.0-beta.2.1",
+        suite.expect(plistVersion == "3.4.0-beta.3",
                "bumping the app version requires re-deciding the support prompt pin above")
         let plistBuild = (releasePlist?["CFBundleVersion"] as? String) ?? ""
-        suite.expect(plistBuild == "89",
+        suite.expect(plistBuild == "90",
                "every app version needs its own incremented bundle build")
         suite.expect(SupportUpdateIntroInfo.releaseVersion == "3.3.2",
                "the support prompt remains deliberately pinned to 3.3.2")
         suite.expect(UpdateHighlightsInfo.releaseVersion == "3.4.0-beta.1",
                "the prepared tour belongs to the first 3.4 beta without changing the installed version")
-        for version in ["3.4.0-beta.1", "3.4.0-beta.2", "3.4.0-beta.2.1", "3.4.0-beta.10"] {
+        for version in ["3.4.0-beta.1", "3.4.0-beta.2", "3.4.0-beta.2.1", "3.4.0-beta.3", "3.4.0-beta.10"] {
             suite.expect(UpdateHighlightsInfo.shouldShow(appVersion: version, lastSeenVersion: nil)
                    && UpdateHighlightsInfo.shouldShow(appVersion: version, lastSeenVersion: "3.3.3"),
                    "the notch tour introduces this beta cycle to new and returning users")
@@ -2114,6 +2157,100 @@ enum SwitcherModelFeatureTests {
                    "an on-screen icon does not keep waiting")
             statusDefaults.removePersistentDomain(forName: statusPlacementSuite)
         }
+
+        // MARK: An item macOS never placed is not "on screen" (issue #1394)
+
+        // Measured on macOS 26 with the app switched off under System Settings
+        // > Menu Bar > "Allow in the Menu Bar": AppKit builds the status window
+        // at the bottom-left origin of the main display (AX reports it at
+        // -1,1295 38x24) and never moves it. That rectangle intersects the
+        // screen, which is all the recovery used to ask, so it logged
+        // "appeared" for an icon nobody could see and never said why.
+        let tahoeMain = CGRect(x: 0, y: 0, width: 2304, height: 1296)
+        let tahoePortrait = CGRect(x: -1080, y: -173, width: 1080, height: 1920)
+        let tahoeScreens = [tahoeMain, tahoePortrait]
+        let unplacedFrame = CGRect(x: -1, y: -23, width: 38, height: 24)
+        suite.expect(tahoeMain.intersects(unplacedFrame),
+               "the unplaced frame does intersect the main screen, which is why intersection alone passed it")
+        suite.expect(!StatusItemAnchorSupport.isSettlingStatusFrame(unplacedFrame),
+               "the unplaced frame has real size, so the settling grace does not cover it")
+        suite.expect(!StatusItemPlacementSupport.isPlacedStatusFrame(unplacedFrame, screenFrames: tahoeScreens),
+               "a status window parked at the bottom-left origin is not a placed icon")
+        suite.expect(StatusItemPlacementSupport.isPlacedStatusFrame(CGRect(x: 1792, y: 1269, width: 38, height: 24),
+                                                                    screenFrames: tahoeScreens),
+               "the same item placed in the main display's menu bar is")
+        suite.expect(StatusItemPlacementSupport.isPlacedStatusFrame(CGRect(x: -900, y: 1710, width: 38, height: 24),
+                                                                    screenFrames: tahoeScreens),
+               "a placement in the portrait display's own menu bar counts too")
+        suite.expect(!StatusItemPlacementSupport.isPlacedStatusFrame(CGRect(x: 1792, y: 1269, width: 0, height: 0),
+                                                                     screenFrames: tahoeScreens),
+               "a sizeless frame is not a placement")
+        let iconIsOnScreenCode = stripCommentLines((statusAnchorAppDelegateSource
+            .components(separatedBy: "private func iconIsOnScreen() -> Bool {").last ?? "")
+            .components(separatedBy: "\n    }").first ?? "")
+        suite.expect(iconIsOnScreenCode.contains("StatusItemPlacementSupport.isPlacedStatusFrame("),
+               "the recovery judges placement by the menu bar band, not by screen intersection")
+
+        // macOS 26 lets the person switch an app's menu bar items off per app,
+        // and remembers the choice in Control Center's group container. The
+        // app cannot override it, so recovery must recognise it and say so
+        // instead of resetting the item's identity for nothing.
+        func tracked(_ bundleID: String, allowed: Bool?) -> [[String: Any]] {
+            var entry: [String: Any] = ["location": ["bundle": ["_0": bundleID]],
+                                        "menuItemLocations": [["bundle": ["_0": bundleID]]]]
+            if let allowed { entry["isAllowed"] = allowed }
+            return [["bundle": ["_0": bundleID]], entry]
+        }
+        let trackedApplications: [Any] = tracked("com.lowtechguys.Clop", allowed: true)
+            + tracked("com.vorssaint.utils", allowed: false)
+            + tracked("com.vorssaint.utils.dev", allowed: true)
+            + tracked("com.example.legacy", allowed: nil)
+        suite.expect(MenuBarAllowanceSupport.allowance(forBundleID: "com.vorssaint.utils",
+                                                       trackedApplications: trackedApplications) == .disallowed,
+               "an app switched off under Allow in the Menu Bar reads as disallowed")
+        suite.expect(MenuBarAllowanceSupport.allowance(forBundleID: "com.vorssaint.utils.dev",
+                                                       trackedApplications: trackedApplications) == .allowed,
+               "a sibling bundle id with its own entry does not bleed over")
+        suite.expect(MenuBarAllowanceSupport.allowance(forBundleID: "com.example.legacy",
+                                                       trackedApplications: trackedApplications) == .unknown,
+               "an entry without the flag is unknown, never a verdict")
+        suite.expect(MenuBarAllowanceSupport.allowance(forBundleID: "com.example.absent",
+                                                       trackedApplications: trackedApplications) == .unknown,
+               "an app Control Center has never tracked is unknown")
+        suite.expect(MenuBarAllowanceSupport.allowance(forBundleID: "com.vorssaint.utils",
+                                                       trackedApplications: ["garbage", 3]) == .unknown,
+               "a malformed store is unknown rather than a crash or a verdict")
+        // The on-disk shape: an outer plist whose trackedApplications value is
+        // itself a binary plist, serialized as data.
+        let innerData = try? PropertyListSerialization.data(fromPropertyList: trackedApplications,
+                                                            format: .binary, options: 0)
+        let outerData = innerData.flatMap {
+            try? PropertyListSerialization.data(fromPropertyList: ["trackedApplications": $0,
+                                                                   "showSpotlight": false],
+                                                format: .binary, options: 0)
+        }
+        suite.expect(outerData.map {
+                MenuBarAllowanceSupport.allowance(forBundleID: "com.vorssaint.utils", groupContainerPlist: $0)
+            } == .disallowed,
+               "the nested Control Center store decodes down to the per-app verdict")
+        suite.expect(MenuBarAllowanceSupport.allowance(forBundleID: "com.vorssaint.utils",
+                                                       groupContainerPlist: Data([0x00, 0x01])) == .unknown,
+               "an unreadable store is unknown")
+        let verifyIconCode = stripCommentLines((statusAnchorAppDelegateSource
+            .components(separatedBy: "private func verifyIconReappeared(").last ?? "")
+            .components(separatedBy: "\n    }").first ?? "")
+        suite.expect(verifyIconCode.contains("MenuBarAllowanceSupport.currentAllowance(")
+                    && verifyIconCode.contains("menuBarIconDisallowedBody"),
+               "recovery names the Allow in the Menu Bar setting instead of blaming a full bar")
+        let allowanceCheck = verifyIconCode.range(of: "MenuBarAllowanceSupport.currentAllowance(")
+        let identityReset = verifyIconCode.range(of: "resetStatusItemPlacementIdentity()")
+        suite.expect(allowanceCheck != nil && identityReset != nil
+                    && allowanceCheck!.lowerBound < identityReset!.lowerBound,
+               "the setting is checked before the identity reset burns the arranged spot")
+        suite.expect(!Strings.enUS.menuBarIconDisallowedBody.isEmpty
+                    && !Strings.ptBR.menuBarIconDisallowedBody.isEmpty
+                    && Strings.enUS.menuBarIconDisallowedBody.contains("Allow in the Menu Bar"),
+               "the hint names the System Settings switch by its own label")
         suite.expect(registeredDefaults[DefaultsKey.panelControlAutoQuit] as? Bool == true,
                "panel auto quit control is visible by default")
         suite.expect(registeredDefaults[DefaultsKey.panelControlShelf] as? Bool == true,
@@ -2210,6 +2347,8 @@ enum SwitcherModelFeatureTests {
                "disk monitor graph is shown by default")
         suite.expect(registeredDefaults[DefaultsKey.monitorNetApps] as? Bool == true,
                "network app usage block is shown by default")
+        suite.expect(registeredDefaults[DefaultsKey.monitorNetAddresses] as? Bool == true,
+               "local address block is shown by default and travels in backups")
         suite.expect(registeredDefaults[DefaultsKey.monitorDiskUsage] as? Bool == true,
                "disk usage block is shown by default")
         suite.expect(registeredDefaults[DefaultsKey.monitorDiskActivity] as? Bool == true,
