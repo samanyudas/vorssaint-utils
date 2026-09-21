@@ -21,6 +21,7 @@ final class ScreenshotQuickPreviewModel: ObservableObject {
 final class ScreenshotQuickPreviewController {
     enum Action {
         case edit
+        case pin
         case copy
         case save
         case saveAndCopy
@@ -509,6 +510,16 @@ private struct ScreenshotQuickPreviewView: View {
                     shareMenu
                 }
                 Spacer(minLength: 4)
+                Button {
+                    perform(.pin)
+                } label: {
+                    Image(systemName: "pin")
+                        .frame(width: 22, height: 18)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .screenshotSafeHelp(strings.pinButton)
+                .accessibilityLabel(strings.pinButton)
                 Button(strings.editButton) {
                     perform(.edit)
                 }
