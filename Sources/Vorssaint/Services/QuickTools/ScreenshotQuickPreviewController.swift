@@ -655,10 +655,9 @@ private struct ScreenshotQuickPreviewView: View {
                     Image(systemName: "link")
                 }
             }
-            .frame(width: 22, height: 18)
+            .frame(width: embedded ? 28 : 22, height: embedded ? 28 : 18)
         } primaryAction: {
             share(.saved())
-            .frame(width: embedded ? 28 : 22, height: embedded ? 28 : 18)
         }
         .disabled(model.sharing)
         .screenshotSafeHelp(model.sharing ? strings.sharingHUD

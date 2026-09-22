@@ -511,13 +511,20 @@ final class ScreenshotService: ObservableObject {
             return
         }
         let uploadingPreview = preview
+        let hadPreview = uploadingPreview != nil
         let captureID = latestCaptureID
         uploadingLatestCapture = true
         QuickToolHUD.show(icon: "link", message: strings.sharingHUD)
         shareDirect(capture, duration: .saved()) { [weak self, weak uploadingPreview] record in
-            guard let self else { return }
-            self.uploadingLatestCapture = false
+            self?.uploadingLatestCapture = false
             guard let record else { return }
+            guard let self,
+                  !hadPreview || (uploadingPreview != nil && self.preview === uploadingPreview) else {
+                Task { @MainActor in
+                    try? await ScreenshotShareService.shared.delete(record)
+                }
+                return
+            }
             self.copyUploadedLink(record, captureID: captureID, preview: uploadingPreview)
         }
     }
