@@ -10,25 +10,41 @@ struct NotchView: View {
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var launcher = QuickLauncherService.shared
     @ObservedObject private var updates = UpdateService.shared
+    @AppStorage(DefaultsKey.liquidGlassEnabled) private var glass = false
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var headerHovered = false
     private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
 
     var body: some View {
         surface
             .frame(width: service.surfaceSize.width, height: service.surfaceSize.height, alignment: .top)
-            .background(.black)
             .foregroundStyle(.white)
             .contentShape(shape)
+            .onChange(of: reduceTransparency) {
+                DispatchQueue.main.async { service.refreshPresentation(animated: false) }
+            }
             .onChange(of: contrast) {
                 DispatchQueue.main.async { service.refreshPresentation(animated: false) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .environment(\.colorScheme, .dark)
             .environment(\.notchPresentation, true)
+            .environment(\.notchGlassSurface, usesGlassSurface)
             .tint(.white)
             .accessibilityIdentifier("notch.surface")
+    }
+
+    private var usesGlassSurface: Bool {
+#if compiler(>=6.2)
+        if #available(macOS 26, *), glass, !reduceTransparency {
+            // Resting wings, compact activities and small status notices keep
+            // blending into the physical camera cutout.
+            return service.usesGlassSurface
+        }
+#endif
+        return false
     }
 
     private var shape: NotchShape {
@@ -106,6 +122,12 @@ struct NotchView: View {
         }
     }
 
+    /// Centre battery content inside the wing's visible area, past its curved shoulder.
+    private var restingBatteryInset: CGFloat {
+        // Leave enough of the 44-point wing for the full 100% label at every height.
+        min(16, NotchLayout.shoulder(height: service.geometry.stripHeight) + NotchLayout.compactEdgeGap)
+    }
+
     private var compact: some View {
         HStack(spacing: 0) {
             if service.idleContent != .none, service.geometry.restingWingWidth > 0 {
@@ -114,10 +136,12 @@ struct NotchView: View {
                     case .music:
                         if let artwork = music.artwork {
                             Image(nsImage: artwork).resizable().scaledToFill()
-                                .frame(width: min(22, service.geometry.menuBarHeight - 6), height: min(22, service.geometry.menuBarHeight - 6))
+                                .frame(width: min(22, service.geometry.stripHeight - 6), height: min(22, service.geometry.stripHeight - 6))
                                 .clipShape(RoundedRectangle(cornerRadius: 5))
                         }
-                    case .battery: Image(systemName: "battery.100percent").font(.system(size: 12))
+                    case .battery:
+                        Image(systemName: "battery.100percent").font(.system(size: 12))
+                            .padding(.leading, restingBatteryInset)
                     case .none: EmptyView()
                     }
                 }.frame(width: service.geometry.restingWingWidth)
@@ -132,6 +156,8 @@ struct NotchView: View {
                     case .battery:
                         if let percent = service.power.chargePercent {
                             Text("\(percent)%").font(.system(size: 9, weight: .medium)).monospacedDigit()
+                                .lineLimit(1)
+                                .padding(.trailing, restingBatteryInset)
                         }
                     case .none: EmptyView()
                     }
@@ -192,6 +218,16 @@ struct NotchView: View {
                 hasSession: session.hasSession, width: size.width, height: size.height))
         case .calendar:
             size.height = max(size.height, NotchLayout.calendarMonthMinimumHeight)
+        case .clipboard:
+            // Search, spacing and a complete card with its action row.
+            size.height = max(size.height, NotchLayout.clipboardSearchHeight + NotchLayout.rowSpacing
+                              + NotchLayout.clipboardCardHeight)
+        case .camera:
+            // Keep permission and error messages, and the stop button, reachable.
+            size.height = max(size.height, 144)
+        case .mixer:
+            // Shorten the tracks before pushing mute and level controls offscreen.
+            size.height = max(size.height, 144)
         case .music:
             let controlsRow = AppFeature.mixer.isAvailable || NotchLyricsSupport.isEnabled() || NotchQueueSupport.isEnabled()
                 ? NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing : 0
@@ -243,7 +279,20 @@ struct NotchView: View {
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            headerActions(quickActions: quickActions)
+            if service.selected == .captures, !showsDetail, !service.showingSections,
+               let actions = service.captureActions {
+                actions.fixedSize()
+                Menu {
+                    Button(service.pinned ? text.unpin : text.pin) { service.pinned.toggle() }
+                    Button(l10n.s.menuSettings, action: service.openSettings)
+                    Button(text.collapse, action: service.collapse)
+                } label: { Image(systemName: "ellipsis") }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel(text.title)
+            } else {
+                headerActions(quickActions: quickActions)
+            }
         }
         .frame(height: NotchLayout.headerHeight)
         .contentShape(Rectangle())
@@ -386,7 +435,7 @@ struct NotchShape: Shape {
 
     func path(in rect: CGRect) -> Path {
         guard attached else { return Path(roundedRect: rect, cornerRadius: radius) }
-        let shoulder = min(NotchLayout.shoulder, rect.height * 0.28)
+        let shoulder = NotchLayout.shoulder(height: rect.height)
         let bottom = min(radius, rect.height / 2, (rect.width - shoulder * 2) / 2)
         let tangent: CGFloat = 0.55228475
         var path = Path()

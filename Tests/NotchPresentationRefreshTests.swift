@@ -59,10 +59,12 @@ enum NotchPresentationRefreshContract {
         func containsHover(_ point: CGPoint) -> Bool { frame.contains(point) }
         func contains(_ point: CGPoint) -> Bool { (animatingFrame ?? frame).contains(point) }
         var onPresent: ((CGSize) -> Void)?
+        var usesGlass = false
         var revealFromHidden = false
         func present(size: CGSize, geometry: NotchGeometry, animated: Bool,
                      transitionContent: NotchContentTransition, quickAccess: NotchQuickAccessConfiguration?,
-                     revealFromHidden: Bool) {
+                     revealFromHidden: Bool, usesGlass: Bool) {
+            self.usesGlass = usesGlass
             self.revealFromHidden = revealFromHidden
             onPresent?(size)
             targetSize = size
@@ -74,12 +76,14 @@ enum NotchPresentationRefreshContract {
         }
     }
     class State: ObservableObject {
+        var hiddenInFullscreen = false
         let objectWillChange = ObservableObjectPublisher()
         var running = true, suspended = false
         var mode = NotchTimerMode.timer
         var session = NotchTimerSession()
         var selected = NotchModule.timer
         var captureID: UUID?
+        var captureActions: Bool?
         var captureContent: Bool?
         var captureContentHeight: CGFloat?
         var captureFallback: (() -> Void)?
@@ -89,6 +93,7 @@ enum NotchPresentationRefreshContract {
         var showingSections = false
         var expanded = true
         var peeking = false, dragPlaceholder = false, compactActivityIsVisible = false
+        var noticeExpanded = false
         var notice: Bool?
         var captureControls: CaptureOptions?
         var captureControlsCollapsed = false, captureSelectionInProgress = false
@@ -115,6 +120,7 @@ enum NotchPresentationRefreshContract {
                                          timerMode: session.hasSession ? session.mode : mode)
         }
         func syncHiddenHoverMonitoring() {}
+        func removeHiddenHoverMonitors() {}
         func toggle() { expanded.toggle() }
         func collapse() { expanded = false }
         var edgeClicksEnabled = false
@@ -126,6 +132,37 @@ enum NotchPresentationRefreshContract {
         UserDefaults.standard.hides = false
         defer { UserDefaults.standard.hides = false }
         captureControlsChecks(suite)
+        let fullscreen = Service()
+        fullscreen.pinned = true
+        fullscreen.hiddenInFullscreen = true
+        fullscreen.refreshPresentation()
+        suite.expect(fullscreen.panel?.isVisible == false && !fullscreen.acceptsSystemFeedback
+                     && !fullscreen.edgeClicksEnabled,
+                     "fullscreen hides even a pinned island and stops routing feedback or edge clicks")
+        fullscreen.hiddenInFullscreen = false
+        fullscreen.refreshPresentation()
+        suite.expect(fullscreen.panel?.isVisible == true && fullscreen.acceptsSystemFeedback,
+                     "leaving fullscreen restores the island and feedback routing")
+
+        let material = Service()
+        material.expanded = false
+        material.geometry = NotchGeometry(screen: material.geometry.screen, safeAreaTop: 38,
+                                          cameraWidth: 210, compactSideRoom: 0)
+        material.refreshPresentation(animated: false)
+        suite.expect(!material.usesGlassSurface && material.windowHost?.usesGlass == false,
+                     "compact presentation remains opaque regardless of camera or footer height")
+        material.peeking = true
+        material.refreshPresentation(animated: false)
+        suite.expect(material.windowHost?.usesGlass == true, "peek requests the glass backdrop")
+        material.peeking = false
+        material.expanded = true
+        material.refreshPresentation(animated: false)
+        suite.expect(material.windowHost?.usesGlass == true, "expanded content requests the glass backdrop")
+        material.expanded = false
+        material.noticeExpanded = true
+        material.refreshPresentation(animated: false)
+        suite.expect(material.windowHost?.usesGlass == true, "expanded notification requests the glass backdrop")
+
         let service = Service()
         var contentSize = service.surfaceSize
         service.windowHost?.targetSize = contentSize
@@ -238,6 +275,8 @@ enum NotchPresentationRefreshContract {
                "ordinary openings keep their existing presentation behavior")
         simulated.expanded = false
         simulated.refreshPresentation()
+        suite.expect(simulated.windowHost?.hideAnimations.last == true,
+               "closing an expanded island without safe menu space animates its withdrawal")
         suite.expect(simulated.panel?.isVisible == false,
                "closing tools withdraws their simulated cutout if the center is still unverified")
 

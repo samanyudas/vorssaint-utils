@@ -11,7 +11,9 @@ enum NotchModule: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .controls: return "slider.horizontal.3"
-        case .mixer: return "slider.vertical.3"
+        // A speaker reads as sound at a glance; faders beside the settings
+        // gear looked like a second settings button.
+        case .mixer: return "speaker.wave.2"
         case .music: return "music.note"
         case .timer: return "timer"
         case .camera: return "web.camera"
@@ -101,8 +103,7 @@ enum NotchLayout {
     static let spacing: CGFloat = 12
     static let bottomInset: CGFloat = 16
     static var chromeHeight: CGFloat { headerHeight + spacing + bottomInset }
-    /// The island stays a wide strip: every page lays its rows out inside the
-    /// preset's budget and runs sideways past it instead of growing downwards.
+    /// The island stays a wide strip: pages scroll within the preset's budget.
     static let compactContentHeight: CGFloat = 180
     static let spaciousContentHeight: CGFloat = 264
     /// Surfaces that are vertical by nature (the embedded app panel, a metric
@@ -122,6 +123,8 @@ enum NotchLayout {
     static let sectionTileHeight: CGFloat = 88
     static let sectionTileWidth: CGFloat = 92
     static let sectionSpacing: CGFloat = 8
+    static let clipboardSearchHeight: CGFloat = 36
+    static let clipboardCardHeight: CGFloat = 104
     static let emptyHeight: CGFloat = 140
     static let musicControlsRowHeight: CGFloat = 32
     static let musicIdleHeight: CGFloat = 84
@@ -147,10 +150,22 @@ enum NotchLayout {
         let room = height - calendarMonthHeaderHeight - calendarMonthWeekdayHeight - calendarMonthSpacing * 2
         return min(30, max(16, (room / 6).rounded(.down)))
     }
+
+    /// Fit a 4:3 preview above the stop button, including narrow, tall islands.
+    static func cameraPreviewSize(in size: CGSize) -> CGSize {
+        let height = max(0, min(size.height - 28 - rowSpacing, size.width * 3 / 4))
+        return CGSize(width: height * 4 / 3, height: height)
+    }
     /// Breathing room every compact strip keeps from its silhouette.
     static let compactEdgeGap: CGFloat = 5
-    /// Bottom corner `NotchShape` draws for a surface of this height.
-    static func surfaceRadius(height: CGFloat) -> CGFloat { min(28, height / 2) }
+    /// Corners of a surface of this height. A strip as tall as the camera
+    /// keeps the cutout's own corners, so the closed island and the last
+    /// frames of a collapse sit inside the notch instead of outlining a
+    /// rounder one; the open island reaches the full radius and shoulder.
+    static func surfaceRadius(height: CGFloat) -> CGFloat { min(28, height * 0.34) }
+    static func shoulder(height: CGFloat) -> CGFloat { min(shoulder, height * 0.19) }
+    /// Content clearance under a camera of the usual height.
+    static let nominalContentTop: CGFloat = 42
 
     static func preferredWidth(_ layout: NotchSize, custom: CGFloat) -> CGFloat {
         switch layout {
@@ -164,9 +179,23 @@ enum NotchLayout {
     /// the usual clearance; custom keeps the chosen height.
     static func nominalHeight(_ layout: NotchSize, custom: CGFloat) -> CGFloat {
         switch layout {
-        case .compact: return 42 + chromeHeight + compactContentHeight
-        case .spacious: return 42 + chromeHeight + spaciousContentHeight
+        case .compact: return nominalContentTop + chromeHeight + compactContentHeight
+        case .spacious: return nominalContentTop + chromeHeight + spaciousContentHeight
         case .custom: return custom
+        }
+    }
+
+    /// Balance complete rows across the available width, keeping reading order
+    /// left to right and allowing each row to fill its width without empty cells.
+    static func systemRowRanges(count: Int, width: CGFloat) -> [Range<Int>] {
+        guard count > 0 else { return [] }
+        let columns = railCapacity(width: width, itemWidth: systemCardWidth, spacing: rowSpacing)
+        let rows = (count + columns - 1) / columns
+        let base = count / rows
+        let remainder = count % rows
+        return (0..<rows).map { row in
+            let start = row * base + min(row, remainder)
+            return start..<(start + base + (row < remainder ? 1 : 0))
         }
     }
 
@@ -301,7 +330,7 @@ enum NotchControlItem: String, CaseIterable, Identifiable {
         case .recording: return "record.circle"
         case .speedTest: return "speedometer"
         case .panel: return "rectangle.topthird.inset.filled"
-        case .mixer: return "slider.vertical.3"
+        case .mixer: return NotchModule.mixer.symbol
         case .commandBar: return "command"
         case .scratchpad: return "note.text"
         case .music: return NotchModule.music.symbol
@@ -856,6 +885,10 @@ struct NotchGeometry: Equatable {
     }
 
     var safeContentTop: CGFloat { cameraHeight + 10 }
+    /// One row beside the camera. It extends the cutout, whose height a
+    /// physical camera sets and a simulated one shares with the bar: a bar
+    /// even a point taller would leave a dark line under the notch.
+    var stripHeight: CGFloat { cameraHeight }
     func activationArea(in size: CGSize, hasHeader: Bool, compactActivity: Bool) -> CGRect {
         let width = compactActivity ? cameraWidth : size.width
         let height = hasHeader ? min(safeContentTop, size.height)
@@ -868,7 +901,7 @@ struct NotchGeometry: Equatable {
         return available >= 44 ? available : 0
     }
     var collapsed: CGSize {
-        CGSize(width: min(screen.width - 24, cameraWidth + restingWingWidth * 2), height: menuBarHeight)
+        CGSize(width: min(screen.width - 24, cameraWidth + restingWingWidth * 2), height: stripHeight)
     }
     func restingSize(showsContent: Bool) -> CGSize {
         showsContent ? collapsed : CGSize(width: cameraWidth, height: cameraHeight)
@@ -885,7 +918,7 @@ struct NotchGeometry: Equatable {
     var musicCameraGap: CGFloat { cameraWidth }
     var compactMusicLabelInset: CGFloat {
         let height = compactActivityContentHeight
-        let shoulder = min(NotchLayout.shoulder, height * 0.28)
+        let shoulder = NotchLayout.shoulder(height: height)
         let bottom = NotchLayout.surfaceRadius(height: height)
         // Wings normally provide this room. When menus hide them, the center
         // text must also clear the silhouette's shoulders and bottom corners.
@@ -908,15 +941,15 @@ struct NotchGeometry: Equatable {
         let measuredRoom = compactSideRoom ?? 0
         let room = measuredRoom.isFinite ? max(0, measuredRoom).rounded(.down) : 0
         let wings = min(max(0, preferred - cameraWidth), room * 2)
-        return CGSize(width: cameraWidth + (wings >= 88 ? wings : 0), height: menuBarHeight)
+        return CGSize(width: cameraWidth + (wings >= 88 ? wings : 0), height: stripHeight)
     }
     var musicWingWidth: CGFloat { max(0, (musicStrip.width - musicCameraGap) / 2) }
 
     /// Only a physical camera may need a footer. A simulated cutout and all
     /// of its compact activity stay within the real menu bar's height.
     var compactActivityUsesFooter: Bool { isNotched && allowsActivityFooter && musicWingWidth < 44 }
-    var compactActivityContentHeight: CGFloat { compactActivityUsesFooter ? 32 : menuBarHeight }
-    var compactActivityTopPadding: CGFloat { compactActivityUsesFooter ? menuBarHeight : 0 }
+    var compactActivityContentHeight: CGFloat { compactActivityUsesFooter ? 32 : stripHeight }
+    var compactActivityTopPadding: CGFloat { compactActivityUsesFooter ? stripHeight : 0 }
     var compactActivityHorizontalPadding: CGFloat { compactActivityUsesFooter ? 4 : 0 }
     var compactActivityCameraGap: CGFloat { compactActivityUsesFooter ? 0 : musicCameraGap }
     var compactActivitySize: CGSize {
@@ -929,7 +962,7 @@ struct NotchGeometry: Equatable {
     }
     /// Where the silhouette's straight edge sits, once its shoulder has flared.
     var compactActivityShoulder: CGFloat {
-        min(NotchLayout.shoulder, compactActivitySize.height * 0.28)
+        NotchLayout.shoulder(height: compactActivitySize.height)
     }
     /// Inset that keeps a vertically centred box of `boxHeight`, itself rounded
     /// by `radius`, an even `gap` away from the strip's silhouette.
@@ -957,7 +990,7 @@ struct NotchGeometry: Equatable {
     var noticeCameraGap: CGFloat { cameraWidth }
 
     func noticeSize(wingWidth: CGFloat) -> CGSize {
-        CGSize(width: min(screen.width - 24, noticeCameraGap + wingWidth * 2), height: menuBarHeight)
+        CGSize(width: min(screen.width - 24, noticeCameraGap + wingWidth * 2), height: stripHeight)
     }
 
     func noticeWingWidth(preferred: CGFloat) -> CGFloat {
@@ -982,7 +1015,7 @@ struct NotchGeometry: Equatable {
         return min(max(preferred, cameraWidth + 36), screen.width - 24 - NotchQuickAccessLayout.gutter * 2)
     }
     var contentWidth: CGFloat { max(0, expandedWidth - NotchLayout.horizontalInset * 2) }
-    /// Rows a page may stack before it has to run sideways.
+    /// Content height available before a page needs to scroll.
     var contentBudget: CGFloat {
         switch layout {
         case .compact: return NotchLayout.compactContentHeight
@@ -998,9 +1031,7 @@ struct NotchGeometry: Equatable {
     var musicExtrasHeight: CGFloat { layout == .custom ? min(216, contentBudget) : 216 }
 
     func systemRows(cards: Int) -> Int {
-        NotchLayout.railRows(count: cards,
-                             perRow: NotchLayout.railCapacity(width: contentWidth, itemWidth: NotchLayout.systemCardWidth, spacing: NotchLayout.rowSpacing),
-                             rowHeight: NotchLayout.systemCardHeight, spacing: NotchLayout.rowSpacing, height: contentBudget)
+        NotchLayout.systemRowRanges(count: cards, width: contentWidth).count
     }
 
     func toolRows(count: Int) -> Int {
@@ -1050,7 +1081,7 @@ struct NotchGeometry: Equatable {
                     : NotchLayout.railHeight(rows: toolRows(count: toolCount), rowHeight: NotchLayout.toolHeight, spacing: NotchLayout.toolSpacing))
             case .timer:
                 contentHeight = min(budget, NotchLayout.timer(mode: timerMode, hasSession: timerHasSession, width: contentWidth, height: budget))
-            // Lists and previews fill the strip and run sideways past it.
+            // Lists and previews fill the chosen content budget.
             case .mixer, .calendar, .clipboard, .captures, .files, .notifications, .downloads, .camera, .scratchpad:
                 contentHeight = budget
             }
@@ -1061,12 +1092,17 @@ struct NotchGeometry: Equatable {
                       height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset))
     }
 
-    /// Search results and the gallery share one rail, so the keyboard walks
-    /// the same columns the eye does; the search itself sits in the header.
+    /// Leave room for a legacy scroll bar without narrowing the tiles below
+    /// their readable width. Keyboard navigation uses these same columns.
+    var sectionColumns: Int {
+        NotchLayout.railCapacity(width: contentWidth - 16, itemWidth: NotchLayout.sectionTileWidth,
+                                 spacing: NotchLayout.sectionSpacing)
+    }
+
+    /// Visible rows; additional rows remain reachable by vertical scrolling.
     func sectionRows(count: Int) -> Int {
         NotchLayout.railRows(count: count,
-                             perRow: NotchLayout.railCapacity(width: contentWidth, itemWidth: NotchLayout.sectionTileWidth,
-                                                              spacing: NotchLayout.sectionSpacing),
+                             perRow: sectionColumns,
                              rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing, height: contentBudget)
     }
 
