@@ -203,7 +203,7 @@ struct NotchRail<Item: Identifiable, Content: View>: View {
                         ForEach(starts, id: \.self) { start in column(start).frame(width: itemWidth).id(start) }
                     }
                 }
-                .scrollIndicators(.hidden)
+                .scrollIndicators(.never)
                 .onAppear {
                     if let targetColumn { proxy.scrollTo(targetColumn, anchor: .center) }
                 }
@@ -226,7 +226,81 @@ struct NotchRail<Item: Identifiable, Content: View>: View {
     }
 }
 
-/// The base remains opaque black. Optional glass belongs to controls alone.
+private struct NotchGlassSurfaceKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var notchGlassSurface: Bool {
+        get { self[NotchGlassSurfaceKey.self] }
+        set { self[NotchGlassSurfaceKey.self] = newValue }
+    }
+}
+
+/// The native host publishes the same path used by its animated mask. Keeping
+/// this in canvas coordinates avoids scaling the glass's corners independently.
+final class NotchBackdropPresentation: ObservableObject {
+    @Published var contour = Path()
+    @Published var usesGlass = false
+}
+
+struct NotchBackdropShape: Shape {
+    var contour: Path
+    func path(in rect: CGRect) -> Path { contour }
+}
+
+struct NotchWindowBackground: View {
+    @ObservedObject var presentation: NotchBackdropPresentation
+    @AppStorage(DefaultsKey.liquidGlassEnabled) private var glass = false
+
+    var body: some View {
+        NotchSurfaceBackground(presentation: presentation, glass: glass)
+    }
+}
+
+/// Keep the upper content dark and open the lower surface into a refractive lip.
+struct NotchSurfaceBackground: View {
+    @ObservedObject var presentation: NotchBackdropPresentation
+    let glass: Bool
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        Group {
+#if compiler(>=6.2)
+            if #available(macOS 26, *), glass, presentation.usesGlass, !reduceTransparency {
+                let shape = NotchBackdropShape(contour: presentation.contour)
+                Color.clear
+                    .glassEffect(.clear, in: shape)
+                    .environment(\.appearsActive, true)
+                    .materialActiveAppearance(.active)
+                    .overlay {
+                        let stops = (0...64).map { index in
+                            let t = Double(index) / 64
+                            return Gradient.Stop(
+                                color: .black.opacity(1 - (contrast == .increased ? 0.10 : 0.45) * pow(t, 2.5)),
+                                location: t)
+                        }
+                        LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
+                            .frame(height: presentation.contour.boundingRect.height)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .mask(shape)
+                    }
+            } else {
+                Color.black
+            }
+#else
+            Color.black
+#endif
+        }
+        .environment(\.colorScheme, .dark)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Controls on the glass shell use quiet translucent fills, leaving the
+/// refraction to the island rather than stacking separate glass lenses.
 struct NotchControlSurface: ViewModifier {
     let cornerRadius: CGFloat
     var selected = false
@@ -234,20 +308,30 @@ struct NotchControlSurface: ViewModifier {
     @AppStorage(DefaultsKey.liquidGlassEnabled) private var glass = false
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.notchGlassSurface) private var glassSurface
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         Group {
-#if compiler(>=6.2)
-            if #available(macOS 26, *), glass, !reduceTransparency {
-                content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
-                    .glassEffect(.regular.interactive(interactive), in: shape)
+            if glassSurface {
+                content
+                    .background(.white.opacity(selected ? 0.11 : 0.045), in: shape)
+                    .overlay {
+                        shape.strokeBorder(.white.opacity(selected ? 0.16 : 0.065), lineWidth: 0.5)
+                            .allowsHitTesting(false)
+                    }
             } else {
-                content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
-            }
+#if compiler(>=6.2)
+                if #available(macOS 26, *), glass, !reduceTransparency {
+                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                        .glassEffect(.regular.interactive(interactive), in: shape)
+                } else {
+                    content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                }
 #else
-            content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
+                content.background(.white.opacity(selected ? 0.12 : 0.065), in: shape)
 #endif
+            }
         }
         .overlay {
             shape.strokeBorder(.white.opacity(contrast == .increased ? 0.5 : 0), lineWidth: 0.75)

@@ -21,6 +21,22 @@ enum NotchTests {
                      && NotchSupport.systemCardCount(hasBattery: false, fans: 0, in: defaults) == 0,
                      "System remains reachable while waiting for the first fan sample")
 
+        suite.expect(NotchLayout.systemRowRanges(count: 7, width: 504) == [0..<3, 3..<5, 5..<7],
+                     "seven System metrics fill balanced rows instead of leaving a nearly empty column")
+        suite.expect(NotchLayout.systemRowRanges(count: 7, width: 304) == [0..<2, 2..<4, 4..<6, 6..<7],
+                     "narrow System rows keep readable cards and a full-width last card")
+        for width: CGFloat in [20, 304, 424, 504, 744] {
+            for count in 0...8 {
+                let rows = NotchLayout.systemRowRanges(count: count, width: width)
+                suite.expect(rows.flatMap { Array($0) } == Array(0..<count),
+                             "System preserves every metric exactly once in reading order")
+                let capacity = NotchLayout.railCapacity(width: width, itemWidth: NotchLayout.systemCardWidth,
+                                                       spacing: NotchLayout.rowSpacing)
+                suite.expect(rows.allSatisfy { !$0.isEmpty && $0.count <= capacity },
+                             "System rows fit the available width for every combination of enabled metrics")
+            }
+        }
+
         suite.expect(NotchLayout.railCapacity(width: 424, itemWidth: 76, spacing: 8) == 5
                && NotchLayout.railCapacity(width: 304, itemWidth: 76, spacing: 8) == 3
                && NotchLayout.railCapacity(width: 20, itemWidth: 76, spacing: 8) == 1
@@ -303,6 +319,30 @@ enum NotchTests {
         }
     }
 
+    /// The menu bar under a camera can be a point taller than the cutout.
+    /// Every closed strip follows the cutout, or a dark line shows under it.
+    private static func physicalStripContracts(_ suite: TestSuite) {
+        let screen = CGRect(x: 0, y: 0, width: 1470, height: 956)
+        for barHeight: CGFloat in [24, 32, 33, 37, 40, 64] {
+            let geometry = NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 179,
+                                         menuBarHeight: barHeight, compactSideRoom: 100)
+            let strips = [geometry.restingSize(showsContent: true), geometry.collapsed, geometry.notice,
+                          geometry.noticeSize(wingWidth: 190), geometry.compactMusicGeometry.compactActivitySize,
+                          geometry.compactTimerGeometry(showsDownloads: true).compactActivitySize]
+            for size in strips {
+                suite.expect(size.height == geometry.cameraHeight && size.height == geometry.stripHeight,
+                       "a strip beside a physical camera is exactly as tall as the cutout")
+            }
+            suite.expect(geometry.menuBarHeight == max(32, barHeight),
+                   "the bar's own height remains available for measuring menu space")
+        }
+        let closed = NotchLayout.surfaceRadius(height: 32)
+        suite.expect(closed >= 8 && closed <= 12 && NotchLayout.shoulder(height: 32) >= 5 && NotchLayout.shoulder(height: 32) <= 8,
+               "a closed island keeps corners like the cutout's, so a collapse settles inside the notch")
+        suite.expect(NotchLayout.surfaceRadius(height: 286) == 28 && NotchLayout.shoulder(height: 286) == NotchLayout.shoulder,
+               "an open island keeps its full corner radius and shoulder")
+    }
+
     private static func musicLabelContracts(_ suite: TestSuite) {
         let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
         for height: CGFloat in [16, 22, 24, 28, 30, 33, 37, 64] {
@@ -310,7 +350,7 @@ enum NotchTests {
                 let geometry = NotchGeometry(screen: screen, safeAreaTop: 0, cameraWidth: 0,
                                              menuBarHeight: height, compactSideRoom: room).compactMusicGeometry
                 let contentLeft = geometry.compactActivityWingWidth + geometry.compactMusicLabelInset
-                let bottomCurveEnd = min(NotchLayout.shoulder, height * 0.28) + min(28, height / 2)
+                let bottomCurveEnd = NotchLayout.shoulder(height: height) + NotchLayout.surfaceRadius(height: height)
                 suite.expect(contentLeft >= bottomCurveEnd + 4,
                        "center text clears the entire curved silhouette even after the music wings disappear")
                 suite.expect(geometry.compactActivityCameraGap - geometry.compactMusicLabelInset * 2 >= 50,
@@ -330,12 +370,14 @@ enum NotchTests {
         simulatedDisplayContracts(suite)
         menuSpaceReuseContracts(suite)
         menuBarHeightContracts(suite)
+        physicalStripContracts(suite)
         musicLabelContracts(suite)
         NotchPanelTests.run { suite.expect($0, $1) }
         NotchHoverTests.run(suite)
         NotchScreenEdgeClickTests.run(suite)
         NotchPresentationRefreshContract.run(suite)
         NotchScreenRefreshContract.run(suite)
+        NotchFullscreenTests.run(suite)
         NotchDestinationContract.run(suite)
         NotchMusicVisibilityTests.run(suite)
         NotchEqualizerTests.run { suite.expect($0, $1) }
@@ -802,7 +844,23 @@ enum NotchTests {
         suite.expect(compact.sectionPickerSize(count: 1) == compact.sectionPickerSize(count: allModules.count)
                && compact.sectionRows(count: allModules.count) == 1 && spacious.sectionRows(count: allModules.count) == 2
                && tall.sectionRows(count: allModules.count) > 2,
-               "the gallery keeps one row on a compact island, two on a spacious one, and runs sideways beyond them")
+               "the gallery keeps one visible row on a compact island and two on a spacious one")
+        for geometry in [compact, spacious, tall] {
+            let columns = geometry.sectionColumns
+            let tileWidth = (geometry.contentWidth - 16 - CGFloat(columns - 1) * NotchLayout.sectionSpacing) / CGFloat(columns)
+            suite.expect(tileWidth >= NotchLayout.sectionTileWidth,
+                   "gallery tiles keep their readable width even with always-visible scroll bars")
+            suite.expect(QuickToolsSupport.gridIndex(after: 0, count: allModules.count,
+                                                     flow: .rows(columns: columns), direction: .down) == columns,
+                   "gallery Down follows the next visible row rather than the old sideways rail")
+        }
+        for size in [CGSize(width: 304, height: 534), CGSize(width: 424, height: 180),
+                     CGSize(width: 504, height: 264)] {
+            let preview = NotchLayout.cameraPreviewSize(in: size)
+            suite.expect(preview.width <= size.width && preview.height + 28 + NotchLayout.rowSpacing <= size.height
+                   && abs(preview.width / preview.height - 4.0 / 3.0) < 0.001,
+                   "camera preview preserves its aspect ratio and leaves the stop button inside the page")
+        }
         suite.expect(compact.contentSize(for: compact.sectionPickerSize(count: 0)).height == NotchLayout.emptyHeight
                && compact.contentSize(for: compact.sectionPickerSize(count: 1)).height == NotchLayout.sectionTileHeight,
                "an unmatched search keeps the recovery guidance's row and a match takes just its tiles, the search living in the header")
@@ -994,9 +1052,9 @@ enum NotchTests {
                     for wing in [CGFloat(112), 190, 240] {
                         let size = geometry.noticeSize(wingWidth: wing)
                         let wings = geometry.noticeWingWidth(preferred: wing)
-                        suite.expect(size.height == geometry.menuBarHeight
+                        suite.expect(size.height == geometry.stripHeight && size.height == geometry.cameraHeight
                                && geometry.frame(for: size).maxY == frame.maxY,
-                               "feedback preserves the same camera clearance on physical and simulated notches")
+                               "feedback stays as tall as the camera cutout on physical and simulated notches")
                         suite.expect(wings > 0 && wings * 2 + geometry.noticeCameraGap == size.width,
                                "notice wings exactly fill their horizontal surface without entering the camera gap")
                         suite.expect(geometry.noticeCameraGap == geometry.cameraWidth,
