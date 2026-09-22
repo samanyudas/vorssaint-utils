@@ -59,9 +59,10 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.level = NotchPanel.normalLevel
-        // Stationary and transient are mutually exclusive. Keep the island
-        // anchored when the desktop is revealed, outside the system's window motion.
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // Transient overlays float across Spaces. Stationary windows follow
+        // the desktop's transition; the two behaviors are mutually exclusive.
+        // AppKit hides a transient overlay while Mission Control is open.
+        panel.collectionBehavior = NotchPanel.overlayCollectionBehavior
         panel.contentView = quickAccessContainer ?? canvas
         canvas.layoutSubtreeIfNeeded()
         appliedFrame = panel.frame
@@ -287,7 +288,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         let body = CGRect(x: (panel.frame.width - quickAccessNotchSize.width) / 2 + shoulder, y: 0,
                           width: quickAccessNotchSize.width - shoulder * 2, height: quickAccessNotchSize.height)
         container.motion.configure(configuration, body: body,
-                                   headerTop: currentGeometry.safeContentTop + NotchLayout.headerHeight / 2,
+                                   headerTop: currentGeometry.headerTopInset + currentGeometry.headerRowHeight / 2,
                                    animated: quickAccessAnimate)
         container.setHoverRects(container.motion.hoverRects.map { $0.intersection(container.bounds) })
     }
@@ -322,11 +323,15 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         currentGeometry.frame(for: canvas.visiblePath?.boundingBoxOfPath.size ?? targetSize)
     }
 
-    func contains(_ screenPoint: CGPoint) -> Bool {
+    /// The island's own surface, without the floating controls beside it.
+    func containsSurface(_ screenPoint: CGPoint) -> Bool {
         guard isPresented else { return false }
-        let local = canvas.convert(panel.convertPoint(fromScreen: screenPoint), from: nil)
-        if canvas.containsVisiblePoint(local) { return true }
-        guard let container = quickAccessContainer else { return false }
+        return canvas.containsVisiblePoint(canvas.convert(panel.convertPoint(fromScreen: screenPoint), from: nil))
+    }
+
+    func contains(_ screenPoint: CGPoint) -> Bool {
+        if containsSurface(screenPoint) { return true }
+        guard isPresented, let container = quickAccessContainer else { return false }
         return container.motion.contains(container.convert(panel.convertPoint(fromScreen: screenPoint), from: nil))
     }
 
@@ -471,6 +476,9 @@ private final class NotchFrameProbe {
 }
 
 final class NotchPanel: NSPanel {
+    static let overlayCollectionBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle
+    ]
     // Status items own the screen edge at their level, even when our view's
     // hit test includes it. Keep the island above them, below native menus.
     static let normalLevel = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
