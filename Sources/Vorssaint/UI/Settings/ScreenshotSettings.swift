@@ -134,6 +134,8 @@ struct ScreenshotCaptureSettings: View {
                 .pickerStyle(.segmented)
                 Toggle(strings.pointerToggle, isOn: $includePointer)
                 Toggle(strings.lastRegionToggle, isOn: $showLastRegion)
+                defaultActionRow
+                previewFocusRow
                 DisclosureGroup {
                     Toggle(strings.loupeStartsOnToggle, isOn: $loupeStartsOn)
                     Toggle(strings.loupeRememberZoomToggle, isOn: $rememberLoupeZoom)
@@ -156,8 +158,6 @@ struct ScreenshotCaptureSettings: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     previewPositionRow
-                    previewFocusRow
-                    defaultActionRow
                 } label: {
                     Text(FeatureStrings.recorder(l10n.language).moreOptions)
                 }
@@ -229,9 +229,11 @@ struct ScreenshotCaptureSettings: View {
     private var defaultActionRow: some View {
         VStack(alignment: .leading, spacing: 4) {
             ScreenshotDefaultActionPicker(strings: strings, selection: $defaultActionRaw)
-            Text(strings.defaultActionCaption)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if defaultActionRaw != ScreenshotDefaultAction.edit.rawValue {
+                Text(strings.defaultActionCaption)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

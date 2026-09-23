@@ -390,6 +390,9 @@ final class ScreenshotQuickPreviewController {
                 case kVK_ANSI_S:
                     self.perform(.save)
                     return nil
+                case kVK_ANSI_W:
+                    self.close()
+                    return nil
                 case kVK_Delete, kVK_ForwardDelete:
                     self.perform(.discard)
                     return nil
