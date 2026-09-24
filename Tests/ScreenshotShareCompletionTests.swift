@@ -78,6 +78,7 @@ enum ScreenshotShareCompletionTests {
         var uploadingLatestCapture = false
         var latestCaptureID = UUID()
         var linkCopyRetry = ScreenshotLinkCopyRetry()
+        var hasLatestCaptureEditor = false
         var preview: ScreenshotQuickPreviewController?
         var completion: (@MainActor (ScreenshotShareRecord?) -> Void)?
         var uploads = 0
@@ -265,5 +266,21 @@ enum ScreenshotShareCompletionTests {
         failedUpload.uploadLastCapture()
         failedUpload.completion?(nil)
         suite.expect(!failedUpload.uploadingLatestCapture, "failed upload clears pending shortcut state")
+
+        service.records = [record]
+        service.copies = []
+        let editing = Uploader()
+        editing.hasLatestCaptureEditor = true
+        editing.linkCopyRetry.remember(record, for: editing.latestCaptureID)
+        editing.uploadLastCapture()
+        suite.expect(editing.uploads == 0 && service.copies.isEmpty,
+                     "shortcut never uploads or copies the stored original while its editor is open")
+
+        let editingWithHistory = Uploader()
+        editingWithHistory.hasLatestCaptureEditor = true
+        _ = editingWithHistory.showPreview(capture: 2)
+        editingWithHistory.uploadLastCapture()
+        suite.expect(editingWithHistory.uploadedCaptures == [2],
+                     "an open history preview still uploads its own visible capture")
     }
 }

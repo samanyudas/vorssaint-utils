@@ -29,6 +29,8 @@ final class ScreenshotService: ObservableObject {
     private var session: ScreenshotSelectionController?
     private var preview: ScreenshotQuickPreviewController?
     private var editors: [ScreenshotEditorController] = []
+    private var latestCaptureEditors: Set<ObjectIdentifier> = []
+    private var hasLatestCaptureEditor: Bool { !latestCaptureEditors.isEmpty }
     private var countdown: DispatchWorkItem?
     private var countdownRemaining = 0
     private var countdownMode: CaptureMode = .standard
@@ -187,6 +189,7 @@ final class ScreenshotService: ObservableObject {
             editor.close()
         }
         editors.removeAll()
+        latestCaptureEditors.removeAll()
         ScreenshotPinController.shared.closeAll()
     }
 
@@ -416,6 +419,7 @@ final class ScreenshotService: ObservableObject {
     private func route(_ capture: ScreenshotSelectionController.Capture) {
         latestCaptureID = UUID()
         linkCopyRetry.clear()
+        latestCaptureEditors.removeAll()
         preview?.close()
         RecentCaptureService.shared.recordScreenshot(capture)
         if ScreenshotSharingSupport.retainsLatestCapture() {
@@ -425,21 +429,23 @@ final class ScreenshotService: ObservableObject {
             autoCopy(capture)
         }
         if ScreenshotDefaultAction.current == .edit {
-            openEditor(with: capture)
+            openEditor(with: capture, ownsLatestCapture: true)
             return
         }
-        presentPreview(capture, defaultAction: ScreenshotDefaultAction.current)
+        presentPreview(capture, defaultAction: ScreenshotDefaultAction.current,
+                       ownsLatestCapture: true)
     }
 
     /// A history item returns to the same floating preview without repeating
     /// automatic copy or save actions that already ran when it was captured.
     func restorePreview(_ capture: ScreenshotSelectionController.Capture) {
         preview?.close()
-        presentPreview(capture, defaultAction: .none)
+        presentPreview(capture, defaultAction: .none, ownsLatestCapture: false)
     }
 
     private func presentPreview(_ capture: ScreenshotSelectionController.Capture,
-                                defaultAction: ScreenshotDefaultAction) {
+                                defaultAction: ScreenshotDefaultAction,
+                                ownsLatestCapture: Bool) {
         var saved: SaveOutcome?
         let controller = ScreenshotQuickPreviewController(
             capture: capture,
@@ -449,7 +455,7 @@ final class ScreenshotService: ObservableObject {
                 guard let self else { return [] }
                 switch action {
                 case .edit:
-                    self.openEditor(with: capture)
+                    self.openEditor(with: capture, ownsLatestCapture: ownsLatestCapture)
                     return [.edit]
                 case .pin:
                     ScreenshotPinController.shared.pin(image: capture.image, scale: capture.scale)
@@ -492,10 +498,12 @@ final class ScreenshotService: ObservableObject {
         controller.show()
     }
 
-    func openEditor(with capture: ScreenshotSelectionController.Capture) {
+    func openEditor(with capture: ScreenshotSelectionController.Capture,
+                    ownsLatestCapture: Bool = false) {
         WindowActivationPolicy.retain()
         let editor = ScreenshotEditorController(capture: capture)
         editors.append(editor)
+        if ownsLatestCapture { latestCaptureEditors.insert(ObjectIdentifier(editor)) }
         editor.show()
     }
 
@@ -507,6 +515,7 @@ final class ScreenshotService: ObservableObject {
             preview.shareLink()
             return
         }
+        guard !hasLatestCaptureEditor else { return }
         guard !uploadingLatestCapture else { return }
         if let record = linkCopyRetry.record(for: latestCaptureID,
                                              availableRecords: ScreenshotShareService.shared.records) {
@@ -557,7 +566,7 @@ final class ScreenshotService: ObservableObject {
         }
         preview?.close()
         preview = nil
-        openEditor(with: capture)
+        openEditor(with: capture, ownsLatestCapture: true)
     }
 
     private func openClipboardImage() {
@@ -617,6 +626,7 @@ final class ScreenshotService: ObservableObject {
 
     func editorDidClose(_ editor: ScreenshotEditorController) {
         guard editors.contains(where: { $0 === editor }) else { return }
+        latestCaptureEditors.remove(ObjectIdentifier(editor))
         editors.removeAll { $0 === editor }
         WindowActivationPolicy.release()
     }
