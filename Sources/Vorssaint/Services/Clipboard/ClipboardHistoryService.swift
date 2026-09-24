@@ -552,6 +552,29 @@ final class ClipboardHistoryService: ObservableObject {
         }
     }
 
+    func editImage(_ entry: ClipboardHistoryEntry) {
+        guard entry.kind == .image, AppFeature.screenshot.isAvailable,
+              let directory = ClipboardImageStore.directory else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let capture = autoreleasepool {
+                ClipboardHistoryImageSupport.editorImage(for: entry, directory: directory)
+                    .flatMap { ScreenshotService.imageCapture(from: $0) }
+            }
+            DispatchQueue.main.async {
+                guard AppFeature.screenshot.isAvailable else { return }
+                guard let capture else {
+                    NSSound.beep()
+                    return
+                }
+                self.hideHistoryWindow()
+                (NSApp.delegate as? AppDelegate)?.closePopover()
+                NotchService.shared.perform {
+                    ScreenshotService.shared.openEditor(with: capture)
+                }
+            }
+        }
+    }
+
     /// No paste follows these two, so nothing has to wait for the write: the
     /// window closes now and a stale entry simply leaves the clipboard as the
     /// user left it.
@@ -1477,6 +1500,73 @@ enum ClipboardImageStore {
         return image
     }
 
+    /// Where a list thumbnail comes from; also its identity for a row that
+    /// loads it asynchronously.
+    enum ThumbnailSource: Hashable {
+        case stored(name: String)
+        case file(path: String, maxPixelSize: CGFloat = 480)
+    }
+
+    static func cachedThumbnail(_ source: ThumbnailSource) -> NSImage? {
+        switch source {
+        case .stored(let name):
+            return thumbnails.object(forKey: name as NSString)
+        case .file(let path, let maxPixelSize):
+            return thumbnails.object(forKey: fileThumbnailKey(path: path, maxPixelSize: maxPixelSize))
+        }
+    }
+
+    /// The same downsample as the synchronous lookups, off the main thread.
+    /// A screenshot PNG takes tens of milliseconds to decode, and once the
+    /// history held more screenshots than the cache fits, rows that decoded
+    /// while drawing redid it on every search keystroke and froze the field.
+    /// A row that is filtered out or scrolled away before its turn cancels
+    /// its decode instead of queueing work nobody will see.
+    static func loadThumbnail(_ source: ThumbnailSource) async -> NSImage? {
+        if let cached = cachedThumbnail(source) { return cached }
+        let request = ThumbnailRequest()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                thumbnailQueue.addOperation {
+                    guard !request.isCancelled else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    switch source {
+                    case .stored(let name):
+                        continuation.resume(returning: thumbnail(named: name))
+                    case .file(let path, let maxPixelSize):
+                        continuation.resume(returning: fileThumbnail(atPath: path, maxPixelSize: maxPixelSize))
+                    }
+                }
+            }
+        } onCancel: {
+            request.cancel()
+        }
+    }
+
+    /// Two decodes at a time: a burst of new rows should not hold dozens of
+    /// full size screenshots in memory at once.
+    private static let thumbnailQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "com.vorssaint.utils.clipboard-thumbnails"
+        queue.maxConcurrentOperationCount = 2
+        queue.qualityOfService = .userInitiated
+        return queue
+    }()
+
+    private final class ThumbnailRequest: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cancelled = false
+
+        var isCancelled: Bool { lock.withLock { cancelled } }
+        func cancel() { lock.withLock { cancelled = true } }
+    }
+
+    private static func fileThumbnailKey(path: String, maxPixelSize: CGFloat) -> NSString {
+        "file:\(path):\(Int(maxPixelSize))" as NSString
+    }
+
     /// The Finder icon for a path, cached: the workspace lookup is a round
     /// trip, and a list row asks for it every time it is drawn.
     static func fileIcon(atPath path: String) -> NSImage {
@@ -1501,7 +1591,7 @@ enum ClipboardImageStore {
 
     /// Downsampled preview for a copied image file on disk, cached.
     static func fileThumbnail(atPath path: String, maxPixelSize: CGFloat = 480) -> NSImage? {
-        let key = "file:\(path):\(Int(maxPixelSize))" as NSString
+        let key = fileThumbnailKey(path: path, maxPixelSize: maxPixelSize)
         if let cached = thumbnails.object(forKey: key) {
             return cached
         }

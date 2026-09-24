@@ -12,6 +12,29 @@ import ImageIO
 import VMStatisticsCompat
 
 enum CommandBarFeatureTests {
+    /// Runs the production `copyAnswer` against a pasteboard that can refuse
+    /// the write and a HUD that records what it shows.
+    enum CopyAnswerHost {
+        final class Pasteboard {
+            enum Kind { case string }
+            static let general = Pasteboard()
+            var accepts = true
+            func clearContents() {}
+            func setString(_ value: String, forType: Kind) -> Bool { accepts }
+        }
+        typealias NSPasteboard = Pasteboard
+        final class Access {
+            static let shared = Access()
+            func async<T>(_ work: @escaping () -> T, then completion: @escaping (T) -> Void) { completion(work()) }
+        }
+        typealias GeneralPasteboardAccess = Access
+        enum HUD {
+            static var shown: [(icon: String, message: String)] = []
+            static func show(icon: String, message: String) { shown.append((icon, message)) }
+        }
+        typealias QuickToolHUD = HUD
+    }
+
     static func run(_ suite: TestSuite) {
         CommandBarInputSourceContract.run(suite)
         CommandBarTerminationContract.run(suite)
@@ -197,6 +220,17 @@ enum CommandBarFeatureTests {
                 && clipboardActionsCode.contains("confirmationPrompt: clipboard.clearRecent")
                 && clipboardActionsCode.contains("ClipboardHistoryService.shared.clearRecent()"),
                "the Command Bar clears only unpinned clipboard items after confirmation")
+        for accepts in [true, false] {
+            CopyAnswerHost.Pasteboard.general.accepts = accepts
+            CopyAnswerHost.HUD.shown = []
+            CopyAnswerHost.copyAnswer("42")
+            let shown = CopyAnswerHost.HUD.shown
+            suite.expect(accepts
+                    ? shown.map(\.icon) == ["doc.on.doc"] && shown.map(\.message) == ["42"]
+                    : shown.map(\.icon) == ["exclamationmark.circle"]
+                        && shown.map(\.message) == [FeatureStrings.commandBar(L10n.shared.language).copyFailed],
+                   "a copied answer shows the value only when the pasteboard took it, found \(shown)")
+        }
 
         // MARK: Compact mode, what an empty field shows
         suite.expect(CommandBarHome.showsBrowseList(compact: false, hasCategory: false, isPeeking: false),
@@ -1363,6 +1397,33 @@ enum CommandBarFeatureTests {
                "nothing is dropped for a script that did not match, or for a non-script link")
         suite.expect(CommandBarLinks.matchingScriptLink(in: scriptLinks, query: "a 100 usd eur") == nil,
                "a non-script link never matches, even with an argument")
+
+        // A script marked to run directly answers to its own global shortcut
+        // with nothing on screen; everything else falls back to opening the
+        // bar the way it always has.
+        suite.expect(!CommandBarLink(name: "h", kind: .script, destination: "/tmp/h").runsDirectly,
+               "a script stays a bar row unless the person marks it to run directly")
+        let directScript = CommandBarLink(name: "h", kind: .script, destination: "/tmp/h",
+                                          runsDirectly: true)
+        suite.expect(CommandBarLinks.directRunScript(
+                forStableKey: "link.\(directScript.id.uuidString)", in: [directScript]) != nil,
+               "a marked script is found by its own row's key")
+        suite.expect(CommandBarLinks.directRunScript(
+                forStableKey: "link.\(scriptLinks[1].id.uuidString)", in: scriptLinks) == nil,
+               "an unmarked script still opens the bar")
+        suite.expect(CommandBarLinks.directRunScript(forStableKey: "kill.browse",
+                                                     in: [directScript]) == nil
+                && CommandBarLinks.directRunScript(
+                    forStableKey: "link.00000000-0000-0000-0000-000000000000",
+                    in: [directScript]) == nil,
+               "a key that is not a saved link's row answers nil, whichever shape it has")
+        let saved = try? JSONDecoder().decode([CommandBarLink].self,
+                                              from: JSONEncoder().encode([directScript]))
+        suite.expect(saved?.first?.runsDirectly == true,
+               "the direct-run mark survives a save")
+        let legacy = try? JSONDecoder().decode(CommandBarLink.self, from: Data("{}".utf8))
+        suite.expect(legacy?.runsDirectly == false,
+               "a shortcut saved before the mark existed still loads, unmarked")
         let overlappingScripts = [
             CommandBarLink(name: "run", kind: .script, destination: "/tmp/short"),
             CommandBarLink(name: "run report", kind: .script, destination: "/tmp/specific"),

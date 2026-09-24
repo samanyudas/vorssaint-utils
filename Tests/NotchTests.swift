@@ -132,7 +132,7 @@ enum NotchTests {
                 suite.expect(top >= cameraHeight, "the page always begins below the physical camera")
                 let area = geometry.activationArea(in: geometry.expanded, hasHeader: true,
                                                    compactActivity: false, expandedHeader: true)
-                if width >= 560 {
+                if width >= 480 {
                     suite.expect(geometry.headerCameraGap == 210 && geometry.headerTopInset == 0,
                                  "wide headers use the space beside the camera without reserving a blank top row")
                     suite.expect(area.width == 210 && area.height == cameraHeight
@@ -148,6 +148,13 @@ enum NotchTests {
                              && NotchLayout.systemCardHeight * 1.028 <= NotchLayout.systemCardHeight + inset * 2,
                              "even a full-width system card can grow on hover inside its viewport")
             }
+        }
+        for layout: NotchSize in [.compact, .spacious] {
+            let geometry = NotchGeometry(screen: screen, safeAreaTop: 32, cameraWidth: 210, layout: layout)
+            suite.expect(geometry.headerTopInset == 0 && geometry.headerCameraGap == 210,
+                         "both presets place the title beside the camera without a blank top row")
+            suite.expect(geometry.quickAccessCenterY - NotchQuickAccessLayout.diameter / 2 == 38,
+                         "floating buttons keep six points of clearance below the menu bar in both presets")
         }
         let simulated = NotchGeometry(screen: screen, safeAreaTop: 0, cameraWidth: 0, layout: .spacious)
         suite.expect(simulated.headerTopInset == 0 && simulated.headerCameraGap == 0,
@@ -168,7 +175,7 @@ enum NotchTests {
             let activities = FeatureStrings.notchActivities(language)
             let notices = [text.onBattery, text.charging, text.charged, text.lowBattery].map {
                 NotchNotice(event: .battery, title: $0, detail: "100%", symbol: "battery.100percent.bolt")
-            } + [NotchNotice(event: .accessory, title: "Wireless Headphones", detail: activities.connected, symbol: "headphones"),
+            } + [NotchNotice(event: .accessory, title: activities.connected, detail: "Wireless Headphones", symbol: "headphones"),
                  NotchNotice(event: .accessory, title: "Wireless Keyboard", detail: activities.lowBattery + " · 15%",
                              symbol: "keyboard", level: 0.15)]
             for physical in [false, true] {
@@ -177,12 +184,11 @@ enum NotchTests {
                                                  cameraWidth: physical ? 180 : 0, menuBarHeight: height)
                     for notice in notices {
                         let wing = geometry.noticeWingWidth(preferred: notice.preferredWingWidth)
-                        let content = wing - 16
-                        suite.expect((notice.event == .accessory && notice.level == nil && wing == 160)
-                               || width(notice.level == nil ? notice.title : notice.detail) + 18 + 8 <= content,
-                               "power labels fit and long accessory names use bounded truncation in \(language)")
+                        let content = wing - 16 - notice.cameraGap
+                        suite.expect(width(notice.level == nil ? notice.title : notice.detail) + 18 + 8 <= content,
+                               "power labels and connection status fit beside their icon in \(language)")
                         suite.expect(notice.level != nil || width(notice.detail) <= content,
-                               "connection status and charge percentage fit the opposite wing in \(language)")
+                               "a device name and a charge percentage fit the opposite wing in \(language)")
                         let size = geometry.noticeSize(wingWidth: notice.preferredWingWidth)
                         suite.expect(size.width == wing * 2 + geometry.cameraWidth && size.height == height
                                && screen.contains(geometry.frame(for: size)),
@@ -195,13 +201,28 @@ enum NotchTests {
             for percent in 0...100 {
                 let notice = NotchNotice(event: event, title: "Level", detail: "\(percent)%",
                                          symbol: "speaker.wave.2", level: Double(percent) / 100)
-                suite.expect(notice.preferredWingWidth == 112, "level changes keep a stable compact width")
+                let wing = notice.preferredWingWidth
+                suite.expect(wing == 80, "level changes keep a stable compact width without an empty outer margin")
+                suite.expect(width(notice.detail) + 18 + 8 + 16 <= wing && wing - 16 >= 64,
+                             "every percentage fits beside its icon while the opposite meter remains readable")
             }
         }
-        let long = NotchNotice(event: .accessory, title: String(repeating: "Device ", count: 100),
-                               detail: "Connected", symbol: "headphones")
-        suite.expect(long.preferredWingWidth == 160 && long.accessibilityText.contains(long.title),
+        let long = NotchNotice(event: .accessory, title: "Connected",
+                               detail: String(repeating: "Device ", count: 100), symbol: "headphones")
+        suite.expect(long.preferredWingWidth == 160 && long.accessibilityText.contains(long.detail),
                "very long device names have bounded visual width and retain their full accessible name")
+        // The name takes a wing of its own instead of sharing one with the
+        // icon, so a common name no longer needs shortening.
+        let trackpad = NotchNotice(event: .accessory, title: "Connected", detail: "Alex’s Magic Trackpad",
+                                   symbol: "rectangle.and.hand.point.up.left")
+        suite.expect(trackpad.preferredWingWidth < 160
+               && width(trackpad.detail) + 16 + trackpad.cameraGap <= trackpad.preferredWingWidth,
+               "a device name fits its wing whole, with the gap its text keeps from the camera")
+        suite.expect(trackpad.readsFromEnds && trackpad.cameraGap > 0
+               && !NotchNotice(event: .volume, title: "Volume", detail: "40%", symbol: "speaker", level: 0.4).readsFromEnds
+               && NotchNotice(event: .volume, title: "Volume", detail: "40%", symbol: "speaker", level: 0.4).cameraGap == 0
+               && NotchNotice(event: .battery, title: "Charging", detail: "80%", symbol: "battery.100percent.bolt").cameraGap == 16,
+               "text reads from the island's ends while levels keep hugging the camera")
         let narrow = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 640, height: 480),
                                    safeAreaTop: 32, cameraWidth: 210)
         let size = narrow.noticeSize(wingWidth: long.preferredWingWidth)
@@ -490,6 +511,13 @@ enum NotchTests {
         defaults.set(false, forKey: DefaultsKey.notchShowInCaptures)
         suite.expect(!NotchSupport.showsInCaptures(in: defaults), "capture visibility remains an explicit opt-out")
         defaults.set(true, forKey: DefaultsKey.notchShowInCaptures)
+        suite.expect(!NotchSupport.hidesUntilHover(in: defaults), "the closed island stays in sight by default")
+        defaults.set(true, forKey: DefaultsKey.notchHideUntilHover)
+        suite.expect(NotchSupport.hidesUntilHover(in: defaults), "hidden until hover waits out of sight for the pointer")
+        defaults.set(false, forKey: DefaultsKey.notchOpenOnHover)
+        suite.expect(!NotchSupport.hidesUntilHover(in: defaults), "an island that opens by click never waits for hover")
+        defaults.set(true, forKey: DefaultsKey.notchOpenOnHover)
+        defaults.set(false, forKey: DefaultsKey.notchHideUntilHover)
         suite.expect(NotchEvent.allCases.allSatisfy { !NotchSupport.routes($0, in: defaults) },
                "disabled notch cannot consume any existing presentation")
         defaults.set(true, forKey: DefaultsKey.notchEnabled)
@@ -1140,23 +1168,63 @@ enum NotchTests {
         suite.expect(NotchMotion.duration(from: roomy.notice, to: idle)
                < NotchMotion.duration(from: idle, to: roomy.notice),
                "horizontal dismissal remains quicker than opening")
+        func near(_ value: CGFloat, _ expected: CGFloat) -> Bool { abs(value - expected) < 0.000_1 }
+        let closing = NotchGlassFade.plan(from: 200, to: 32, endsInGlass: false, current: 1)
+        suite.expect(near(closing.openness(atHeight: 200), 1) && near(closing.openness(atHeight: 80), 1)
+                && near(closing.openness(atHeight: 56), 0.5) && near(closing.openness(atHeight: 32), 0),
+               "settled glass closing into a black strip darkens only over the last stretch and arrives black")
+        let opening = NotchGlassFade.plan(from: 32, to: 200, endsInGlass: true, current: 0)
+        suite.expect(near(opening.openness(atHeight: 32), 0) && near(opening.openness(atHeight: 56), 0.5)
+                && near(opening.openness(atHeight: 80), 1) && near(opening.openness(atHeight: 200), 1),
+               "glass leaving a black strip opens up over the first stretch")
+        let reopened = NotchGlassFade.plan(from: 56, to: 200, endsInGlass: true,
+                                           current: closing.openness(atHeight: 56))
+        suite.expect(near(reopened.openness(atHeight: 56), 0.5) && near(reopened.openness(atHeight: 200), 1),
+               "a close reversed halfway reopens from the openness on screen and ends fully open")
+        let reclosed = NotchGlassFade.plan(from: 44, to: 32, endsInGlass: false,
+                                           current: opening.openness(atHeight: 44))
+        suite.expect(near(reclosed.openness(atHeight: 44), 0.25) && near(reclosed.openness(atHeight: 32), 0),
+               "an opening reversed early closes from the openness on screen and ends black")
+        suite.expect(NotchGlassFade.plan(from: 100, to: 300, endsInGlass: true, current: 1) == .open
+                && NotchGlassFade.plan(from: 300, to: 100, endsInGlass: true, current: 1) == .open
+                && NotchGlassFade.plan(from: .nan, to: 100, endsInGlass: false, current: 1) == .open,
+               "glass resizing into glass, or an unreadable height, stays fully open")
         let compactMusic = roomy.compactMusicGeometry
-        suite.expect(compactMusic.compactActivityWingWidth == 44
+        suite.expect(compactMusic.compactActivityWingWidth == 34
                && compactMusic.compactActivityCameraGap == roomy.cameraWidth
-               && compactMusic.compactActivitySize.width == roomy.cameraWidth + 88,
-               "compact music uses narrow wings without padding against the physical camera")
-        for available: CGFloat in [0, 27, 43, 44, 45, 55, 56, 100, .nan, .infinity] {
+               && compactMusic.compactActivitySize.width == roomy.cameraWidth + 68,
+               "compact music wings beside a physical camera hold only the cover and the bars")
+        for safeArea: CGFloat in [32, 33, 37.5, 38] {
+            let music = NotchGeometry(screen: menuScreen, safeAreaTop: safeArea, cameraWidth: 185,
+                                      menuBarHeight: 24, compactSideRoom: 100).compactMusicGeometry
+            let height = music.compactActivitySize.height
+            let shoulder = NotchLayout.shoulder(height: height)
+            let corner = NotchLayout.surfaceRadius(height: height)
+            let side = music.compactMusicArtworkSide
+            let gap = (height - side) / 2
+            let radius = music.compactMusicArtworkRadius
+            let inset = music.compactMusicArtworkInset
+            suite.expect(abs(inset - shoulder - gap) < 0.001 && abs(inset + radius - shoulder - corner) < 0.001
+                   && abs(height - gap - radius - (height - corner)) < 0.001,
+                   "the cover keeps one gap from the strip's end, top and bottom, its corners concentric with the strip's")
+            let bars = music.compactMusicBarsInset + NotchLayout.compactMusicBarsWidth
+            suite.expect(music.compactActivityWingWidth == max(inset + side, bars).rounded(.up)
+                   && music.compactActivityWingWidth < 44,
+                   "each music wing ends where the cover or the bars end, snug against the camera")
+        }
+        for available: CGFloat in [0, 27, 33, 34, 43, 44, 45, 55, 56, 100, .nan, .infinity] {
             var tight = roomy
             tight.compactSideRoom = available
             let music = tight.compactMusicGeometry
             suite.expect(!music.compactActivityUsesFooter && music.compactActivitySize.height == roomy.menuBarHeight
                    && music.compactActivityTopPadding == 0,
                    "compact music never grows or moves below the menu bar when space changes")
-            if available.isFinite && available >= 44 {
-                let cover = min(26, music.menuBarHeight - 6, music.compactActivityWingWidth - 20)
-                suite.expect(cover >= 24 && cover + 20 <= music.compactActivityWingWidth
+            if available.isFinite && available >= compactMusic.compactActivityWingWidth {
+                suite.expect(music.compactActivityWingWidth == compactMusic.compactActivityWingWidth
+                       && music.compactMusicArtworkSide == 22
+                       && music.compactMusicArtworkInset + music.compactMusicArtworkSide <= music.compactActivityWingWidth
                        && music.compactActivityCameraGap == roomy.cameraWidth,
-                       "narrow music wings keep a full cover, inner clearance and outer margin beside the camera")
+                       "fitted music wings keep a full cover and its outer margin beside the camera")
             } else {
                 suite.expect(music.compactActivityWingWidth == 0,
                        "unavailable menu space cannot push music into the physical camera or adjacent menus")
@@ -1323,6 +1391,36 @@ enum NotchTests {
                "metadata-only updates retain the existing artwork without retransmitting it")
         suite.expect(NotchPlayback.decode(playingReply, previousArtwork: cachedArtwork)?.track.artworkData == nil,
                "a new track without artwork clears the old cover")
+
+        var coverCache = NotchArtworkCache<String>()
+        coverCache.update("cover A", for: playing, now: now)
+        coverCache.update(nil, for: playback, now: now.addingTimeInterval(10))
+        suite.expect(coverCache.artwork == "cover A" && coverCache.expiresAt == nil,
+               "pausing with a metadata-only reply retains the decoded cover of the same song")
+        let nextReply = Data(String(decoding: playingReply, as: UTF8.self)
+            .replacingOccurrences(of: "A track", with: "Next track").utf8)
+        let next = NotchPlayback.decode(nextReply, now: now)
+        coverCache.update(nil, for: next, now: now)
+        let deadline = coverCache.expiresAt
+        coverCache.update(nil, for: next, now: now.addingTimeInterval(0.5))
+        suite.expect(coverCache.artwork == "cover A" && coverCache.expiresAt == deadline,
+               "track changes bridge delayed artwork without extending the grace period on every update")
+        coverCache.update("cover B", for: next, now: now.addingTimeInterval(1))
+        coverCache.expire(at: now.addingTimeInterval(2))
+        suite.expect(coverCache.artwork == "cover B" && coverCache.expiresAt == nil,
+               "the new cover replaces the old cover and cancels its expiry")
+        coverCache.update(nil, for: playing, now: now.addingTimeInterval(3))
+        coverCache.expire(at: now.addingTimeInterval(5))
+        suite.expect(coverCache.artwork == nil, "a song without artwork cannot retain another song's cover indefinitely")
+        coverCache.update("cover A", for: playing, now: now)
+        let otherPlayer = NotchPlayback.decode(Data(String(decoding: playingReply, as: UTF8.self)
+            .replacingOccurrences(of: "\"pid\":12", with: "\"pid\":13").utf8))
+        coverCache.update(nil, for: otherPlayer, now: now)
+        suite.expect(coverCache.artwork == nil, "switching players never inherits the previous player's cover")
+        coverCache.update("cover A", for: playing, now: now)
+        coverCache.update(nil, for: nil, now: now)
+        suite.expect(coverCache.artwork == nil && coverCache.expiresAt == nil,
+               "ending playback releases the cached cover and its deadline")
 
         let seekableReply = Data(String(decoding: playingReply, as: UTF8.self)
             .replacingOccurrences(of: "\"pid\":12", with: "\"pid\":12,\"canSeek\":true").utf8)

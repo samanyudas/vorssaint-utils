@@ -149,9 +149,8 @@ enum NotchPresentationProbe {
             cameraWidth: cameraWidth, menuBarHeight: measurements.height(
                 displayID: screen.notchDisplayID, frame: screen.frame, visibleTop: screen.visibleFrame.maxY,
                 scale: screen.backingScaleFactor, statusBarThickness: NSStatusBar.system.thickness))
-        let notice = NotchNotice(event: .accessory, title: title,
-                                detail: FeatureStrings.notchActivities(L10n.shared.language).connected,
-                                symbol: NotchAccessorySupport.symbol(for: .audio, name: title))
+        let notice = NotchNotice(event: .accessory, title: FeatureStrings.notchActivities(L10n.shared.language).connected,
+                                detail: title, symbol: NotchAccessorySupport.symbol(name: title, majorClass: 0x04, minorClass: 0x06))
         let size = geometry.noticeSize(wingWidth: notice.preferredWingWidth)
         let content = NotchNoticeView(notice: notice, geometry: geometry)
             .frame(width: size.width, height: size.height).background(.black)
@@ -308,9 +307,12 @@ enum NotchPresentationProbe {
         host.panel.ignoresMouseEvents = true
         host.panel.orderFrontRegardless()
         var failures = checkHiddenReveal(screen: screen)
-        if host.panel.collectionBehavior.intersection([.managed, .transient, .stationary]) != .transient
+        if host.panel.collectionBehavior.intersection([.managed, .transient, .stationary]) != .stationary
             || !host.panel.collectionBehavior.contains(.canJoinAllSpaces) {
-            failures.append("the island must float across Spaces without following the desktop's window motion")
+            failures.append("the island must stay stationary when revealing the desktop, without a conflicting window motion policy")
+        }
+        if host.overlayProbeHolds == false {
+            failures.append("the island is not held in a Space of its own, so a desktop swipe would slide it away")
         }
         if host.panel.level.rawValue <= NSWindow.Level.statusBar.rawValue
             || host.panel.level.rawValue >= NSWindow.Level.popUpMenu.rawValue {
@@ -343,10 +345,16 @@ enum NotchPresentationProbe {
         var noticeHeightLimit: CGFloat?
         var lostStationaryHover = false
         var hoverHosts = [host]
+        // The openness of the last glass frame on the way to a black strip.
+        var tracksClosingGlass = false
+        var closingGlassOpenness: Double?
         let stationaryPointer = CGPoint(x: screen.frame.midX - geometry.cameraWidth / 4,
                                         y: screen.frame.maxY)
         func sample() {
             samples += 1
+            if tracksClosingGlass, host.backdropProbeUsesGlass {
+                closingGlassOpenness = host.backdropProbeOpenness
+            }
             if host.contentCanvasSize != host.panel.frame.size { canvasChangedSize = true }
             maxAnchorError = max(maxAnchorError, abs(host.panel.frame.maxY - (screen.frame.maxY)))
             maxContentError = max(maxContentError, abs(host.contentTopOnScreen - host.panel.frame.maxY))
@@ -374,6 +382,9 @@ enum NotchPresentationProbe {
         host.present(size: geometry.expanded, geometry: geometry, animated: true, transitionContent: .reveal, usesGlass: true)
         if !reduceMotion, !host.contentProbeAnimating {
             failures.append("opening content has no reveal transition")
+        }
+        if !reduceMotion, host.backdropProbeOpenness > 0.01 {
+            failures.append("glass opened at full strength over the black strip it grows out of")
         }
         advance(0.09)
         let intermediate = host.visibleFrame
@@ -405,6 +416,10 @@ enum NotchPresentationProbe {
         advance(0.52)
         if nativeResizes > 2 { failures.append("opening resized its native window every frame: \(nativeResizes)") }
         let openingResizes = nativeResizes
+        if !reduceMotion, host.backdropProbeOpenness < 0.99 {
+            failures.append("settled glass stayed partly closed")
+        }
+        tracksClosingGlass = true
         host.present(size: geometry.notice, geometry: geometry, animated: true, transitionContent: .dismiss)
         var completedActions = 0
         host.whenSettled { completedActions += 1 }
@@ -421,6 +436,10 @@ enum NotchPresentationProbe {
             failures.append("closing disabled the hosting view's interaction frame")
         }
         advance(0.52)
+        tracksClosingGlass = false
+        if !reduceMotion, (closingGlassOpenness ?? 1) > 0.15 {
+            failures.append("glass reached the black strip still open: \(closingGlassOpenness ?? 1)")
+        }
         if !matchesNativeFrame(host.panel.frame, geometry.frame(for: geometry.notice)) { failures.append("notice did not settle") }
         if host.backdropProbeUsesGlass || host.backdropProbeScheduled {
             failures.append("compact notice retained glass or its frame scheduler after settling")
@@ -448,6 +467,11 @@ enum NotchPresentationProbe {
         checkBackdrop(downloadHost, failures: &failures)
         if !reduceMotion && !downloadHost.backdropProbeUsesGlass {
             failures.append("closing dropped the previous glass before settling")
+        }
+        // Preferences sync without animation, and can do so while the island closes.
+        downloadHost.present(size: crowded.compactActivitySize, geometry: crowded, animated: false)
+        if !reduceMotion && !downloadHost.backdropProbeUsesGlass {
+            failures.append("an unanimated refresh dropped the closing glass before settling")
         }
         advance(0.6)
         if downloadHost.backdropProbeUsesGlass || downloadHost.backdropProbeScheduled {
@@ -642,6 +666,46 @@ enum NotchPresentationProbe {
             if !bubbles.quickAccessProbeInteractive || bubbles.quickAccessProbeTrackingAreas != 1
                 || !bubbles.quickAccessProbeCenters.allSatisfy(bubbles.contains) {
                 failures.append("reversing the floating animation lost its final hit targets")
+            }
+        }
+        for layout: NotchSize in [.compact, .spacious] {
+            let shortGeometry = NotchGeometry(screen: screen.frame, safeAreaTop: 32,
+                                              cameraWidth: 210, layout: layout)
+            let shortSize = shortGeometry.expandedSize(module: .system, systemCards: 3)
+            for side: NotchQuickAccessSide in [.left, .right] {
+                let access = NotchQuickAccessConfiguration(side: side, actions: [.explore, .settings, .pin])
+                bubbles.present(size: shortSize, geometry: shortGeometry, animated: true, quickAccess: access)
+                advance(0.8)
+                if bubbles.visibleFrame.size != shortSize || bubbles.contentCanvasSize != shortSize {
+                    failures.append("reserving space for side buttons enlarged a short page")
+                }
+                if !bubbles.quickAccessProbeInteractive || bubbles.quickAccessProbeCenters.count != 3 {
+                    failures.append("a short page lost its side buttons")
+                }
+                for point in bubbles.quickAccessProbeCenters {
+                    let radius = NotchQuickAccessLayout.diameter / 2
+                    let circle = CGRect(x: point.x - radius, y: point.y - radius,
+                                        width: radius * 2, height: radius * 2)
+                    let lowerEdge = CGPoint(x: point.x, y: point.y - radius + 1)
+                    let hoverEdge = CGPoint(x: point.x, y: point.y - radius - NotchQuickAccessLayout.hoverMargin + 1)
+                    if !bubbles.panel.frame.contains(circle)
+                        || !bubbles.contains(lowerEdge)
+                        || bubbles.panel.contentView?.hitTest(bubbles.panel.convertPoint(fromScreen: lowerEdge)) == nil
+                        || !bubbles.containsHover(hoverEdge) {
+                        failures.append("a side button or its hover margin escaped a short page's backing window")
+                    }
+                }
+                let resizes = bubbles.resizeCount
+                bubbles.present(size: shortSize, geometry: shortGeometry, animated: false, quickAccess: access)
+                if bubbles.resizeCount != resizes {
+                    failures.append("unchanged side-button padding restarted a window resize")
+                }
+                bubbles.present(size: shortGeometry.collapsed, geometry: shortGeometry, animated: true)
+                advance(0.95)
+                if !matchesNativeFrame(bubbles.panel.frame, shortGeometry.frame(for: shortGeometry.collapsed))
+                    || bubbles.quickAccessProbeInteractive || bubbles.quickAccessProbeTrackingAreas != 0 {
+                    failures.append("closing a short page retained side-button space or hover tracking")
+                }
             }
         }
         let mixed = NotchQuickAccessConfiguration(buttons: NotchQuickAccessSide.allCases.flatMap { side in

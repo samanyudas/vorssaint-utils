@@ -1276,9 +1276,10 @@ enum CommandBarCatalog {
     private static func copyAnswer(_ value: String) {
         GeneralPasteboardAccess.shared.async({
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(value, forType: .string)
-        }, then: {
-            QuickToolHUD.show(icon: "doc.on.doc", message: value)
+            return NSPasteboard.general.setString(value, forType: .string)
+        }, then: { copied in
+            QuickToolHUD.show(icon: copied ? "doc.on.doc" : "exclamationmark.circle",
+                              message: copied ? value : FeatureStrings.commandBar(L10n.shared.language).copyFailed)
         })
     }
 
@@ -1406,6 +1407,18 @@ enum CommandBarCatalog {
         GeneralPasteboardAccess.shared.async({
             NSPasteboard.general.string(forType: .string) ?? ""
         }, then: body)
+    }
+
+    /// A global shortcut pressed on a script marked as running directly: the
+    /// file runs for its side effects, with no argument and nothing on
+    /// screen — not the bar, not a result to copy. A failure beeps, the way
+    /// an app shortcut that would not open does.
+    static func runScriptDirectly(_ link: CommandBarLink) {
+        let path = (link.destination as NSString).expandingTildeInPath
+        DispatchQueue.global(qos: .userInitiated).async {
+            let (status, _) = Shell.run(path, [], maxOutputBytes: 64 * 1024)
+            if status != 0 { DispatchQueue.main.async { NSSound.beep() } }
+        }
     }
 
     /// Return pressed before a script's debounced run has answered yet: runs

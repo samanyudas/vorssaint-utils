@@ -32,6 +32,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private var targetUsesGlass = false
     private var mouseEventsBeforeHide: Bool?
     private var frameProbe: NotchFrameProbe?
+    private let overlaySpace = NotchOverlaySpace()
     private var concealedForFrameChange = false
     private var restoresKeyAfterFrameChange = false
     private var settledActions: [() -> Void] = []
@@ -59,13 +60,16 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         panel.isReleasedWhenClosed = false
         panel.animationBehavior = .none
         panel.level = NotchPanel.normalLevel
-        // Transient overlays float across Spaces. Stationary windows follow
-        // the desktop's transition; the two behaviors are mutually exclusive.
-        // AppKit hides a transient overlay while Mission Control is open.
+        // Stationary keeps the island in place when the desktop is revealed,
+        // where files are dragged onto it; a transient overlay is swept away
+        // with the windows. The two behaviors are mutually exclusive, and the
+        // stationary one also slides with the desktop between Spaces; the
+        // island's own Space, joined before it first shows, holds it in place.
         panel.collectionBehavior = NotchPanel.overlayCollectionBehavior
         panel.contentView = quickAccessContainer ?? canvas
         canvas.layoutSubtreeIfNeeded()
         appliedFrame = panel.frame
+        overlaySpace?.add(panel)
     }
 
     /// Visible, or ordered out for the few milliseconds of a concealed frame change.
@@ -102,7 +106,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         }
         let canAnimate = animated && (isPresented || revealing) && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let previousGutter = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
-        let previousBottom: CGFloat = quickAccessConfiguration?.hasBottom == true ? NotchQuickAccessLayout.gutter : 0
+        let previousBottom = quickAccessBottomInset(for: targetSize, geometry: currentGeometry)
         let previousFrame = currentGeometry.frame(for: CGSize(width: targetSize.width + previousGutter * 2, height: targetSize.height + previousBottom))
         let withdrawing = !revealing && quickAccessConfiguration != nil && quickAccess == nil
         if revealing { quickAccessContainer?.motion.setVisible(false, animated: false) }
@@ -111,12 +115,22 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         if quickAccessConfiguration != nil { quickAccessNotchSize = size }
         if withdrawing { quickAccessContainer?.motion.setVisible(false, animated: canAnimate) }
         let gutter = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
-        let bottom: CGFloat = quickAccessConfiguration?.hasBottom == true ? NotchQuickAccessLayout.gutter : 0
+        let bottom = quickAccessBottomInset(for: size, geometry: geometry)
         let frame = geometry.frame(for: CGSize(width: size.width + gutter * 2, height: size.height + bottom))
         let changesFrame = revealing || (hideWhenSettled && !canAnimate) || size != targetSize
             || frame != previousFrame || (!isAnimating && panel.frame != appliedFrame)
         targetUsesGlass = usesGlass
-        canvas.setUsesGlass(usesGlass || (canAnimate && (changesFrame || isAnimating) && canvas.usesGlass))
+        if canAnimate && changesFrame && (usesGlass || canvas.usesGlass) {
+            // Glass closing into a black strip darkens on the way there, so the
+            // material swap on arrival changes nothing on screen; opening out of
+            // one lets the glass in gradually.
+            let start = revealing ? 0 : canvas.visiblePath?.boundingBoxOfPath.height ?? targetSize.height
+            canvas.backdropPresentation.planFade(from: start, to: size.height, endsInGlass: usesGlass)
+        }
+        // A shape still moving keeps its glass until it settles, even when an
+        // unanimated refresh lands meanwhile: a click in Settings closes the
+        // island and the option it changes syncs preferences mid-close.
+        canvas.setUsesGlass(usesGlass || (((canAnimate && changesFrame) || isAnimating) && canvas.usesGlass))
         guard changesFrame || transitionContent != .none else {
             currentGeometry = geometry
             configureQuickAccess()
@@ -198,7 +212,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     private func settle() {
         let generation = animationGeneration
         let gutter: CGFloat = quickAccessConfiguration == nil ? 0 : NotchQuickAccessLayout.gutter
-        let bottom: CGFloat = quickAccessConfiguration?.hasBottom == true ? NotchQuickAccessLayout.gutter : 0
+        let bottom = quickAccessBottomInset(for: targetSize, geometry: currentGeometry)
         // A departing island is ordered out below; its released bounds are never shown.
         let concealed = !hidesWhenSettled
             && concealForFrameChange(to: reservedFrame(mainSize: targetSize, gutter: gutter, bottom: bottom), generation: generation)
@@ -207,6 +221,8 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         isAnimating = false
         canvas.stopMotion()
         canvas.setUsesGlass(targetUsesGlass)
+        // Settled glass is fully open, whatever a cut-short transition planned.
+        if targetUsesGlass { canvas.backdropPresentation.openFully() }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         canvas.setContentSize(targetSize)
@@ -227,6 +243,19 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
 
     private func reservedFrame(mainSize: CGSize, gutter: CGFloat, bottom: CGFloat) -> CGRect {
         currentGeometry.frame(for: CGSize(width: mainSize.width + gutter * 2, height: mainSize.height + bottom))
+    }
+
+    /// Short pages may end above the last side button. Keep its circle and
+    /// hover margin inside the window without enlarging the island's surface.
+    private func quickAccessBottomInset(for size: CGSize, geometry: NotchGeometry) -> CGFloat {
+        guard let configuration = quickAccessConfiguration else { return 0 }
+        let sideCount = max(configuration.buttons.filter { $0.side == .left }.count,
+                            configuration.buttons.filter { $0.side == .right }.count)
+        let sideBottom = sideCount > 0
+            ? geometry.quickAccessCenterY + CGFloat(sideCount - 1) * NotchQuickAccessLayout.rowSpacing
+                + NotchQuickAccessLayout.diameter / 2 + NotchQuickAccessLayout.hoverMargin
+            : 0
+        return max(configuration.hasBottom ? NotchQuickAccessLayout.gutter : 0, sideBottom - size.height)
     }
 
     /// Mission Control switches the window server into a mode where every
@@ -288,7 +317,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         let body = CGRect(x: (panel.frame.width - quickAccessNotchSize.width) / 2 + shoulder, y: 0,
                           width: quickAccessNotchSize.width - shoulder * 2, height: quickAccessNotchSize.height)
         container.motion.configure(configuration, body: body,
-                                   headerTop: currentGeometry.headerTopInset + currentGeometry.headerRowHeight / 2,
+                                   headerTop: currentGeometry.quickAccessCenterY,
                                    animated: quickAccessAnimate)
         container.setHoverRects(container.motion.hoverRects.map { $0.intersection(container.bounds) })
     }
@@ -364,6 +393,9 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
     var backdropProbePath: CGPath { canvas.backdropPresentation.contour.cgPath }
     var silhouetteProbePath: CGPath? { canvas.visiblePath }
     var backdropProbeUsesGlass: Bool { canvas.usesGlass }
+    var backdropProbeOpenness: Double { canvas.backdropPresentation.openness }
+    /// Nil where this macOS has no overlay Spaces to offer.
+    var overlayProbeHolds: Bool? { overlaySpace.map { $0.probeHolds(panel) } }
     var backdropProbeScheduled: Bool { canvas.backdropDisplayLink != nil }
     var backdropProbeTicks: Int { canvas.backdropTicks }
     func synchronizeBackdropProbe() { canvas.synchronizeBackdrop() }
@@ -399,6 +431,7 @@ final class NotchWindowHost: NSObject, CAAnimationDelegate {
         quickAccessContainer?.setHoverRects([])
         panel.orderOut(nil)
         panel.contentView = nil
+        overlaySpace?.close()
         frameProbe?.close()
         frameProbe = nil
         runSettledActions()
@@ -477,7 +510,7 @@ private final class NotchFrameProbe {
 
 final class NotchPanel: NSPanel {
     static let overlayCollectionBehavior: NSWindow.CollectionBehavior = [
-        .canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle
+        .canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle
     ]
     // Status items own the screen edge at their level, even when our view's
     // hit test includes it. Keep the island above them, below native menus.
@@ -486,6 +519,13 @@ final class NotchPanel: NSPanel {
     var handleScroll: ((NSEvent) -> Bool)?
     override var canBecomeKey: Bool { acceptsKeyFocus }
     override var canBecomeMain: Bool { false }
+    // Liquid Glass swaps to a flat, blurred stand-in in a window that looks
+    // inactive, and a non-activating panel only looks active while it holds
+    // key focus: an island opened by hover stayed dull until clicked. Like
+    // the menu bar it hangs from, the island always looks active, without
+    // taking the keyboard from the app in front. AppKit's own glass windows
+    // answer this private question the same way.
+    @objc func _hasActiveAppearanceIgnoringKeyFocus() -> Bool { true }
     // AppKit describes a non-activating panel as a system dialog, which tiling
     // window managers then track and list on whichever space is current; the
     // borderless overlays they leave alone are undescribed windows.
