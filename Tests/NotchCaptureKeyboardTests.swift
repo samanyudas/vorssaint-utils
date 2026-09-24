@@ -23,7 +23,8 @@ enum NotchCaptureKeyboardContract {
             static let control = Self(rawValue: 2)
             static let option = Self(rawValue: 4)
             static let shift = Self(rawValue: 8)
-            static let deviceIndependentFlagsMask = Self(rawValue: 15)
+            static let capsLock = Self(rawValue: 16)
+            static let deviceIndependentFlagsMask = Self(rawValue: 31)
         }
         struct EventTypeMask: OptionSet {
             let rawValue: Int
@@ -133,10 +134,11 @@ enum NotchCaptureKeyboardTests {
                                          ("w", kVK_ANSI_Z, true), ("z", kVK_ANSI_W, false),
                                          ("é", kVK_ANSI_W, false), ("ц", kVK_ANSI_W, true),
                                          ("ц", kVK_ANSI_Z, false)] {
-            for flags in 0..<16 {
+            for flags in 0..<32 {
                 preview.closed = false
                 preview.actions = []
-                let accepts = closes && flags == Event.ModifierFlags.command.rawValue
+                let accepts = closes && flags & ~Event.ModifierFlags.capsLock.rawValue
+                    == Event.ModifierFlags.command.rawValue
                 let event = Event(window: panel, keyCode: UInt16(key), modifierFlags: .init(rawValue: flags),
                                   charactersIgnoringModifiers: character)
                 suite.expect((Event.handler?(event) == nil) == accepts

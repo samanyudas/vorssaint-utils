@@ -382,7 +382,7 @@ final class ScreenshotQuickPreviewController {
                   !ShortcutCapture.isCapturing else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let key = Int(event.keyCode)
-            if flags == .command {
+            if flags.intersection([.command, .option, .shift, .control]) == .command {
                 let text = event.charactersIgnoringModifiers?.folding(
                     options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
                 let letter = text?.count == 1 ? text?.first : nil
