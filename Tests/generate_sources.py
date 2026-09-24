@@ -552,7 +552,9 @@ def main():
     preview = "Sources/Vorssaint/Services/QuickTools/ScreenshotQuickPreviewController.swift"
     write("ScreenshotShareCompletion.swift", "import Foundation\n"
           + "extension ScreenshotShareCompletionTests {\nfinal class Controller: State {\n"
-          + declaration(preview, "    private func performShare(").replace("private func", "func", 1)
+          + "".join(declaration(preview, prefix).replace("private func", "func", 1)
+                    for prefix in ["    func shareLink()", "    private func performShare(",
+                                   "    private func copySharedLink()", "    private func scheduleAutoDismiss("])
           + "}\n}\n")
     screenshot_service = "Sources/Vorssaint/Services/QuickTools/ScreenshotService.swift"
     write("ScreenshotShortcutCompletion.swift", "import Foundation\n"

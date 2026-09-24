@@ -6,12 +6,17 @@ import Foundation
 /// Runs the production completion handler with controlled upload and clipboard results.
 /// No network request or native preview is created.
 enum ScreenshotShareCompletionTests {
+    typealias DispatchQueue = NotchScreenRefreshContract.DispatchQueue
     final class Model {
+        var deletingShare = false
         var sharing = false
         var sharedRecord: ScreenshotShareRecord?
     }
 
     class State {
+        var pointerInside = false
+        var onClose: () -> Void = {}
+        var shareHandler: ((ScreenshotShareDuration, @escaping @MainActor (ScreenshotShareRecord?) -> Void) -> Void)?
         var closed = false
         let model = Model()
         var dismissWork: DispatchWorkItem?
@@ -19,19 +24,20 @@ enum ScreenshotShareCompletionTests {
         var completion: (@MainActor (ScreenshotShareRecord?) -> Void)?
         var copies: [ScreenshotShareRecord] = []
         var copySucceeds = true
-        var retryScheduled = false
         var showingLink = false
 
         func share(_ duration: ScreenshotShareDuration,
                    completion: @escaping @MainActor (ScreenshotShareRecord?) -> Void) {
             self.completion = completion
+            shareHandler?(duration, completion)
         }
-        func copyLinkAndClose(_ record: ScreenshotShareRecord) -> Bool {
+        func close() { closed = true; onClose() }
+        @MainActor func copyLinkAndClose(_ record: ScreenshotShareRecord) -> Bool {
             copies.append(record)
-            if copySucceeds { closed = true }
-            return copySucceeds
+            let copied = copySucceeds && ScreenshotShareService.shared.copy(record.url)
+            if copied { close() }
+            return copied
         }
-        func scheduleAutoDismiss() { retryScheduled = true }
         func resizePanel(showingLink: Bool) { self.showingLink = showingLink }
     }
 
@@ -63,11 +69,7 @@ enum ScreenshotShareCompletionTests {
         static func show(icon: String, message: String) {}
     }
 
-    final class ScreenshotQuickPreviewController {
-        var closed = false
-        var onClose: () -> Void = {}
-        func close() { closed = true; onClose() }
-    }
+    typealias ScreenshotQuickPreviewController = Controller
 
     @MainActor class UploadState {
         let defaultsName = "vorss.tests.screenshot-shortcut.\(UUID().uuidString)"
@@ -79,6 +81,7 @@ enum ScreenshotShareCompletionTests {
         var preview: ScreenshotQuickPreviewController?
         var completion: (@MainActor (ScreenshotShareRecord?) -> Void)?
         var uploads = 0
+        var uploadedCaptures: [Int] = []
 
         init() {
             defaults = UserDefaults(suiteName: defaultsName)!
@@ -91,10 +94,14 @@ enum ScreenshotShareCompletionTests {
         func shareDirect(_ capture: Int, duration: ScreenshotShareDuration,
                          completion: @escaping @MainActor (ScreenshotShareRecord?) -> Void) {
             uploads += 1
+            uploadedCaptures.append(capture)
             self.completion = completion
         }
-        func showPreview() -> ScreenshotQuickPreviewController {
+        func showPreview(capture: Int = 1) -> ScreenshotQuickPreviewController {
             let controller = ScreenshotQuickPreviewController()
+            controller.shareHandler = { [weak self] duration, completion in
+                self?.shareDirect(capture, duration: duration, completion: completion)
+            }
             controller.onClose = { [weak self] in self?.preview = nil }
             preview = controller
             return controller
@@ -158,15 +165,15 @@ enum ScreenshotShareCompletionTests {
         failedCopy.performShare(.oneHour)
         failedCopy.completion?(record)
         suite.expect(!failedCopy.closed && failedCopy.model.sharedRecord == record
-                     && failedCopy.showingLink && failedCopy.retryScheduled,
+                     && failedCopy.showingLink && failedCopy.dismissWork != nil,
                      "clipboard failure retains the existing link and copy controls in the preview")
 
-        for scenario in ["open", "closed", "released", "replaced", "standalone", "owner released"] {
+        for scenario in ["open", "closed", "released", "replaced", "standalone", "standalone replaced", "history opened", "owner released"] {
             service.revoked = []
             service.copies = []
             service.clipboard = "new capture"
             var uploader: Uploader? = Uploader()
-            var preview: ScreenshotQuickPreviewController? = scenario == "standalone"
+            var preview: ScreenshotQuickPreviewController? = ["standalone", "standalone replaced", "history opened"].contains(scenario)
                 ? nil : uploader!.showPreview()
             uploader!.uploadLastCapture()
             uploader!.uploadLastCapture()
@@ -178,10 +185,15 @@ enum ScreenshotShareCompletionTests {
                 uploader!.latestCaptureID = UUID()
                 _ = uploader!.showPreview()
             }
-            if scenario == "owner released" { uploader = nil }
+            if scenario == "standalone replaced" {
+                uploader!.latestCaptureID = UUID()
+                _ = uploader!.showPreview()
+            }
+            if scenario == "history opened" { _ = uploader!.showPreview(capture: 2) }
+            if scenario == "owner released" { preview = nil; uploader = nil }
             completion?(record)
             for _ in 0..<20 { await Task.yield() }
-            if ["open", "standalone"].contains(scenario) {
+            if ["open", "standalone", "history opened"].contains(scenario) {
                 suite.expect(service.copies == [record.url] && service.revoked.isEmpty,
                              "\(scenario) shortcut upload delivers its link")
                 if scenario == "open" {
@@ -193,6 +205,9 @@ enum ScreenshotShareCompletionTests {
                              "\(scenario) shortcut upload should revoke and preserve clipboard; "
                              + "copies=\(service.copies.count), revoked=\(service.revoked.count), "
                              + "clipboard=\(service.clipboard)")
+            }
+            if scenario == "history opened" {
+                suite.expect(uploader?.preview?.closed == false, "standalone upload leaves a later history preview open")
             }
             if let uploader {
                 suite.expect(!uploader.uploadingLatestCapture, "completion clears pending shortcut upload")
@@ -209,8 +224,42 @@ enum ScreenshotShareCompletionTests {
         suite.expect(!retryPreview.closed, "failed shortcut copy keeps its preview open")
         service.copySucceeds = true
         retry.uploadLastCapture()
+        for _ in 0..<20 { await Task.yield() }
         suite.expect(retry.uploads == 1 && service.copies == [record.url, record.url]
                      && retryPreview.closed, "shortcut retries a failed copy without another upload")
+        service.copies = []
+        service.copySucceeds = false
+        let standaloneRetry = Uploader()
+        standaloneRetry.uploadLastCapture()
+        standaloneRetry.completion?(record)
+        service.copySucceeds = true
+        standaloneRetry.uploadLastCapture()
+        suite.expect(standaloneRetry.uploads == 1 && service.copies == [record.url, record.url],
+                     "standalone shortcut retries copying its existing link without uploading again")
+        for duration in [3.0, 12.0] {
+            DispatchQueue.main = NotchScreenRefreshContract.Scheduler()
+            let history = Uploader()
+            let historyPreview = history.showPreview(capture: 2)
+            historyPreview.autoDismissDuration = duration
+            historyPreview.scheduleAutoDismiss()
+            history.uploadLastCapture()
+            DispatchQueue.main.advance(duration + 1)
+            suite.expect(!historyPreview.closed && historyPreview.model.sharing,
+                         "shortcut upload keeps preview open past its dismissal deadline")
+            suite.expect(history.uploadedCaptures == [2], "shortcut uploads the visible history capture")
+            history.completion?(record)
+            suite.expect(historyPreview.closed, "history upload copies and closes its own preview")
+        }
+        DispatchQueue.main = NotchScreenRefreshContract.Scheduler()
+        let deleting = Uploader()
+        let deletingPreview = deleting.showPreview()
+        deletingPreview.model.sharedRecord = record
+        deletingPreview.model.deletingShare = true
+        service.copies = []
+        deleting.uploadLastCapture()
+        for _ in 0..<20 { await Task.yield() }
+        suite.expect(service.copies.isEmpty && deleting.uploads == 0,
+                     "shortcut cannot copy or upload while the preview deletes its link")
         service.records = []
         let failedUpload = Uploader()
         failedUpload.uploadLastCapture()

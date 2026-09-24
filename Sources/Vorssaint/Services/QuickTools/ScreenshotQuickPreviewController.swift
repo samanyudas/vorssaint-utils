@@ -254,6 +254,15 @@ final class ScreenshotQuickPreviewController {
         close()
     }
 
+    func shareLink() {
+        guard !closed, !model.deletingShare else { return }
+        if model.sharedRecord != nil {
+            copySharedLink()
+        } else {
+            performShare(.saved())
+        }
+    }
+
     private func performShare(_ duration: ScreenshotShareDuration) {
         guard !closed, !model.sharing else { return }
         dismissWork?.cancel()

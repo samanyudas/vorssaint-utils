@@ -499,42 +499,43 @@ final class ScreenshotService: ObservableObject {
     @MainActor
     private func uploadLastCapture() {
         guard AppFeature.screenshot.isAvailable,
-              ScreenshotSharingSupport.uploadShortcutEnabled(),
-              !uploadingLatestCapture else { return }
+              ScreenshotSharingSupport.uploadShortcutEnabled() else { return }
+        if let preview {
+            preview.shareLink()
+            return
+        }
+        guard !uploadingLatestCapture else { return }
         if let record = linkCopyRetry.record(for: latestCaptureID,
                                              availableRecords: ScreenshotShareService.shared.records) {
-            copyUploadedLink(record, captureID: latestCaptureID, preview: preview)
+            copyUploadedLink(record, captureID: latestCaptureID)
             return
         }
         guard let capture = ScreenshotLastCaptureStore.load() else {
             QuickToolHUD.show(icon: "camera.viewfinder", message: strings.lastCaptureMissing)
             return
         }
-        let uploadingPreview = preview
-        let hadPreview = uploadingPreview != nil
         let captureID = latestCaptureID
         uploadingLatestCapture = true
         QuickToolHUD.show(icon: "link", message: strings.sharingHUD)
-        shareDirect(capture, duration: .saved()) { [weak self, weak uploadingPreview] record in
+        shareDirect(capture, duration: .saved()) { [weak self] record in
             self?.uploadingLatestCapture = false
             guard let record else { return }
             guard let self,
-                  !hadPreview || (uploadingPreview != nil && self.preview === uploadingPreview) else {
+                  self.latestCaptureID == captureID else {
                 Task { @MainActor in
                     try? await ScreenshotShareService.shared.delete(record)
                 }
                 return
             }
-            self.copyUploadedLink(record, captureID: captureID, preview: uploadingPreview)
+            self.copyUploadedLink(record, captureID: captureID)
         }
     }
 
     @MainActor
-    private func copyUploadedLink(_ record: ScreenshotShareRecord, captureID: UUID,
-                                  preview: ScreenshotQuickPreviewController?) {
+    private func copyUploadedLink(_ record: ScreenshotShareRecord, captureID: UUID) {
         let copied = ScreenshotSharingSupport.copyLink(
             record, using: ScreenshotShareService.shared.copy,
-            dismiss: { preview?.close() })
+            dismiss: {})
         if captureID == latestCaptureID {
             if copied {
                 linkCopyRetry.clear()
