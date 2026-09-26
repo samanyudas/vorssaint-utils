@@ -4,10 +4,6 @@
 import SwiftUI
 import EventKit
 
-private enum NotchSettingsTab: CaseIterable {
-    case layout, content, activity, behavior
-}
-
 struct NotchSettings: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var features = FeatureRuntime.shared
@@ -15,22 +11,23 @@ struct NotchSettings: View {
     @ObservedObject private var notch = NotchService.shared
     @ObservedObject private var router = SettingsRouter.shared
     @AppStorage(DefaultsKey.notchGesturesEnabled) private var gesturesEnabled = true
-    @AppStorage(DefaultsKey.notchKeyboardLight) private var keyboardLight = false
-    @AppStorage(DefaultsKey.notchNotificationsEnabled) private var notificationsEnabled = false
+    @AppStorage(DefaultsKey.notchKeyboardLight) private var keyboardLight = true
+    @AppStorage(DefaultsKey.notchNotificationsEnabled) private var notificationsEnabled = true
     @AppStorage(DefaultsKey.notchDismissNativeNotifications) private var dismissNativeNotifications = false
     @AppStorage(DefaultsKey.notchTimerEnabled) private var timerEnabled = true
     @AppStorage(DefaultsKey.notchTimerSoundEnabled) private var timerSoundEnabled = true
-    @AppStorage(DefaultsKey.notchCameraEnabled) private var cameraEnabled = false
-    @AppStorage(DefaultsKey.notchAccessoriesEnabled) private var accessoriesEnabled = false
+    @AppStorage(DefaultsKey.notchCameraEnabled) private var cameraEnabled = true
+    @AppStorage(DefaultsKey.notchAccessoriesEnabled) private var accessoriesEnabled = true
     @AppStorage(DefaultsKey.notchCalendarEnabled) private var calendarEnabled = true
-    @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = false
-    @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = false
+    @AppStorage(DefaultsKey.notchCalendarCountdown) private var calendarCountdown = false
+    @AppStorage(DefaultsKey.notchAgentsEnabled) private var agentsEnabled = true
+    @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchLyricsOnline) private var lyricsOnline = false
-    @AppStorage(DefaultsKey.notchQueueEnabled) private var queueEnabled = false
+    @AppStorage(DefaultsKey.notchQueueEnabled) private var queueEnabled = true
     @AppStorage(DefaultsKey.notchLiveEqualizer) private var liveEqualizer = false
     @AppStorage(DefaultsKey.notchEnabled) private var enabled = false
     @AppStorage(DefaultsKey.notchDisplay) private var display = NotchDisplay.automatic.rawValue
-    @AppStorage(DefaultsKey.notchOpenOnHover) private var hover = true
+    @AppStorage(DefaultsKey.notchOpenOnHover) private var hover = false
     @AppStorage(DefaultsKey.notchHideInFullscreen) private var hideInFullscreen = false
     @AppStorage(DefaultsKey.notchHideUntilHover) private var hideUntilHover = false
     @AppStorage(DefaultsKey.notchCoversMenus) private var coversMenus = true
@@ -42,16 +39,18 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchVolume) private var volume = true
     @AppStorage(DefaultsKey.notchBrightness) private var brightness = true
     @AppStorage(DefaultsKey.notchBattery) private var battery = true
-    @AppStorage(DefaultsKey.notchClipboard) private var clipboard = false
+    @AppStorage(DefaultsKey.notchClipboard) private var clipboard = true
     @AppStorage(DefaultsKey.notchClipboardWindow) private var clipboardWindow = true
     @AppStorage(DefaultsKey.screenshotDefaultAction) private var captureAction = ""
-    @AppStorage(DefaultsKey.notchCapture) private var capture = false
+    @AppStorage(DefaultsKey.notchCapture) private var capture = true
+    @AppStorage(DefaultsKey.notchTrackChange) private var trackChange = true
     @AppStorage(DefaultsKey.notchShowPlayingMusic) private var showPlayingMusic = true
     @AppStorage(DefaultsKey.notchIdleContent) private var idle = NotchIdleContent.music.rawValue
     @AppStorage(DefaultsKey.notchHiddenControls) private var hiddenControls = NotchControlItem.defaultHidden
     @AppStorage(DefaultsKey.notchControlOrder) private var controlOrder = ""
     @AppStorage(DefaultsKey.notchShowInCaptures) private var showInCaptures = true
-    @AppStorage(DefaultsKey.notchSize) private var size = NotchSize.spacious.rawValue
+    @AppStorage(DefaultsKey.notchSize) private var size = NotchSize.compact.rawValue
+    @AppStorage(DefaultsKey.notchOutlineEnabled) private var outlineEnabled = false
     @AppStorage(DefaultsKey.notchCustomWidth) private var customWidth = NotchSize.defaultWidth
     @AppStorage(DefaultsKey.notchCustomHeight) private var customHeight = NotchSize.defaultHeight
     @AppStorage(DefaultsKey.notchHapticFeedback) private var hapticFeedback = true
@@ -59,7 +58,8 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchDragReveal) private var dragReveal = true
     @AppStorage(DefaultsKey.notchCaptureControls) private var captureControls = true
     @AppStorage(DefaultsKey.notchQuickPanel) private var quickPanel = true
-    @AppStorage(DefaultsKey.notchAppPanel) private var appPanel = true
+    @AppStorage(DefaultsKey.notchAppPanel) private var appPanel = false
+    @AppStorage(DefaultsKey.notchHidesMenuBarIcon) private var hidesMenuBarIcon = false
     @AppStorage(DefaultsKey.notchScratchpad) private var scratchpad = true
     @AppStorage(DefaultsKey.brightnessControlEnabled) private var brightnessControlEnabled = false
     @AppStorage(DefaultsKey.clipboardHistoryEnabled) private var clipboardHistoryEnabled = false
@@ -74,9 +74,9 @@ struct NotchSettings: View {
     private var editor: NotchEditorStrings { FeatureStrings.notchEditor(l10n.language) }
 
     private var configuration: [String] {
-        [String(enabled), String(calendarEnabled), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), idle, hiddenControls, controlOrder, size,
-         String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(customWidth), String(customHeight), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(hideInFullscreen), String(coversMenus), display, String(hover), hidden, order, String(volume),
-         String(brightness), String(keyboardLight), String(battery), String(clipboard), String(clipboardWindow), String(capture), captureAction, String(showInCaptures), String(returnHome), homeModule, String(scratchpad), String(agentsEnabled)]
+        [String(enabled), String(calendarEnabled), String(calendarCountdown), String(notificationsEnabled), String(dismissNativeNotifications), String(gesturesEnabled), String(lyricsEnabled), String(lyricsOnline), String(queueEnabled), String(liveEqualizer), String(showPlayingMusic), idle, hiddenControls, controlOrder, size,
+         String(timerEnabled), String(timerSoundEnabled), String(cameraEnabled), String(accessoriesEnabled), String(outlineEnabled), String(customWidth), String(customHeight), String(hapticFeedback), String(shelfWindow), String(dragReveal), String(captureControls), String(quickPanel), String(appPanel), String(hoverExpand), String(hideUntilHover), String(hideInFullscreen), String(coversMenus), display, String(hover), hidden, order, String(volume),
+         String(brightness), String(keyboardLight), String(battery), String(clipboard), String(clipboardWindow), String(capture), String(trackChange), captureAction, String(showInCaptures), String(returnHome), homeModule, String(scratchpad), String(agentsEnabled)]
     }
 
     private var access: Binding<NotchQuickAccessConfiguration> {
@@ -108,16 +108,7 @@ struct NotchSettings: View {
                     PermissionRow(kind: .accessibility)
                 }
             }
-            HStack {
-                Picker(text.title, selection: $tab) {
-                    Text(editor.layout).tag(NotchSettingsTab.layout)
-                    Text(editor.content).tag(NotchSettingsTab.content)
-                    Text(editor.activity).tag(NotchSettingsTab.activity)
-                    Text(editor.behavior).tag(NotchSettingsTab.behavior)
-                }.pickerStyle(.segmented).labelsHidden()
-                Button { NotchService.shared.open() } label: { Image(systemName: "arrow.up.forward.app") }
-                    .buttonStyle(.bordered).disabled(!enabled).help(text.open).accessibilityLabel(text.open)
-            }
+            NotchSettingsTabRow(tab: $tab, language: l10n.language, canOpen: enabled) { NotchService.shared.open() }
             if tab == .content {
                 GeometryReader { proxy in contentEditor(in: proxy.size) }
             } else {
@@ -179,6 +170,9 @@ struct NotchSettings: View {
                     }
                     Text(text.sizeHint).font(.caption).foregroundStyle(.secondary)
                 }
+            }
+            SettingsCard {
+                switchRow("capsule", text.showOutline, isOn: $outlineEnabled)
             }
         }
     }
@@ -322,6 +316,9 @@ struct NotchSettings: View {
                 Button(calendar.allow, action: permissions.requestCalendar).disabled(permissions.requestingCalendar)
                 Button(calendar.settings, action: permissions.openCalendarSettings)
             }
+            Divider()
+            switchRow("calendar.badge.clock", calendar.countdown, caption: calendar.countdownHint,
+                      isOn: $calendarCountdown)
         case .timer:
             switchRow("speaker.wave.2", FeatureStrings.notchActivities(l10n.language).soundEnabled, isOn: $timerSoundEnabled)
                 .disabled(!AppFeature.notchTimer.isAvailable)
@@ -381,8 +378,9 @@ struct NotchSettings: View {
                 let clipboardAvailable = AppFeature.clipboardHistory.isAvailable && clipboardHistoryEnabled
                     && NotchSupport.modules().contains(.clipboard)
                 let capturesAvailable = AppFeature.screenshot.isAvailable && NotchSupport.modules().contains(.captures)
+                let musicAvailable = NotchSupport.modules().contains(.music)
                 let reserves = ![volumeAvailable, brightnessAvailable, keyboardLightAvailable, batteryAvailable,
-                                 accessoriesAvailable, clipboardAvailable, capturesAvailable].allSatisfy { $0 }
+                                 accessoriesAvailable, clipboardAvailable, capturesAvailable, musicAvailable].allSatisfy { $0 }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 10)], spacing: 10) {
                     toggleCard(text.volume, symbol: "speaker.wave.2", value: $volume, available: volumeAvailable,
                                reason: enableFeatureReason(.mixer), reservesReason: reserves)
@@ -404,6 +402,8 @@ struct NotchSettings: View {
                     toggleCard(text.captures, symbol: "camera.viewfinder", value: $capture, available: capturesAvailable,
                                reason: AppFeature.screenshot.isAvailable ? editor.showPage(text.captures) : enableFeatureReason(.screenshot),
                                reservesReason: reserves)
+                    toggleCard(text.newTrack, symbol: "music.note", value: $trackChange, available: musicAvailable,
+                               reason: editor.showPage(text.music), reservesReason: reserves)
                 }
                 if accessoriesEnabled { Text(FeatureStrings.notchActivities(l10n.language).accessoryDescription).font(.caption).foregroundStyle(.secondary) }
                 if enabled, (volume || brightness || keyboardLight), !permissions.accessibility { PermissionRow(kind: .accessibility) }
@@ -448,7 +448,9 @@ struct NotchSettings: View {
             SettingsCard(title: text.display) {
                 switchRow("arrow.up.left.and.arrow.down.right", text.hideInFullscreen, isOn: $hideInFullscreen)
                 HStack(spacing: 8) {
-                    choice(text.automatic, symbol: "display.2", selected: display == NotchDisplay.automatic.rawValue) { display = NotchDisplay.automatic.rawValue }
+                    // A mode this version no longer offers is treated as automatic, as the island does.
+                    choice(text.automatic, symbol: "display.2",
+                           selected: (NotchDisplay(rawValue: display) ?? .automatic) == .automatic) { display = NotchDisplay.automatic.rawValue }
                     choice(text.builtIn, symbol: "laptopcomputer", selected: display == NotchDisplay.builtIn.rawValue) { display = NotchDisplay.builtIn.rawValue }
                     choice(text.mainDisplay, symbol: "display", selected: display == NotchDisplay.main.rawValue) { display = NotchDisplay.main.rawValue }
                 }
@@ -456,6 +458,8 @@ struct NotchSettings: View {
             SettingsCard(title: editor.destinations) {
                 destination(text.panel, symbol: "bubble.middle.top", value: $appPanel)
                 Text(editor.appPanelHint).font(.caption).foregroundStyle(.secondary)
+                switchRow("menubar.rectangle", editor.hideMenuBarIcon, caption: editor.hideMenuBarIconHint,
+                          isOn: $hidesMenuBarIcon)
                 destination(text.tools, symbol: "square.grid.2x2", value: $quickPanel, available: AppFeature.quickLauncher.isAvailable)
                 destination(FeatureStrings.clipboard(l10n.language).title, symbol: "doc.on.clipboard", value: $clipboardWindow, available: AppFeature.clipboardHistory.isAvailable)
                 destination(text.files, symbol: "tray.full", value: $shelfWindow, available: AppFeature.shelf.isAvailable)
@@ -587,11 +591,9 @@ struct NotchSettings: View {
     }
 
     private func destination(_ title: String, symbol: String, value: Binding<Bool>, available: Bool = true) -> some View {
-        SettingsRow(symbol: symbol, title: title) {
-            Picker(title, selection: value) {
-                Text(text.title).tag(true)
-                Text(editor.separate).tag(false)
-            }.pickerStyle(.segmented).labelsHidden().fixedSize()
+        SettingsChoiceRow(symbol: symbol, title: title, selection: value) {
+            Text(text.title).tag(true)
+            Text(editor.separate).tag(false)
         }.disabled(!available)
     }
 

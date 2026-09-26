@@ -69,8 +69,11 @@ enum NotchMusicVisibilityTests {
         var dragPlaceholder = false
         var hasTimerActivity = false
         var hasDownloadActivity = false
+        var downloadName: String?
         var hasAgentActivity = false
+        var timerStripWing: CGFloat = 44
         var agentStripWing: CGFloat = 58
+        var calendarStripWing: CGFloat = 120
         var notchNeedsMonitor = false
         var heldDrag = false
         var pinned = false
@@ -79,6 +82,7 @@ enum NotchMusicVisibilityTests {
         var highlightedSection: NotchModule?
         var sectionRow = 0
         var hoverState = NotchHoverState()
+        var hoverEmphasized = false
         var hoverWork: DispatchWorkItem?
         var windowHost: Host?
         var panel: Panel? = Panel()
@@ -105,6 +109,7 @@ enum NotchMusicVisibilityTests {
         for (key, value) in Defaults.registeredDefaults where key.hasPrefix("notch") { defaults.set(value, forKey: key) }
         for feature in AppFeature.allCases { defaults.set(true, forKey: feature.availabilityKey) }
         defaults.set(true, forKey: DefaultsKey.notchEnabled)
+        defaults.set(false, forKey: DefaultsKey.notchTrackChange)
         let service = Service()
         let reader = NotchMusicService.shared
         service.modules = NotchSupport.modules(in: defaults)
@@ -139,6 +144,13 @@ enum NotchMusicVisibilityTests {
             reopened.syncVisibleConsumers()
             suite.expect(!reader.running && reopened.compactActivity == nil && reopened.surfaceSize == closed,
                    "a fresh island honors saved Nothing while playback metadata is still available")
+            defaults.set(true, forKey: DefaultsKey.notchTrackChange)
+            service.syncVisibleConsumers()
+            suite.expect(reader.running && service.compactActivity == nil && service.surfaceSize == closed,
+                   "announcing new songs keeps the reader on with Nothing at rest, without a music strip")
+            defaults.set(false, forKey: DefaultsKey.notchTrackChange)
+            service.syncVisibleConsumers()
+            suite.expect(!reader.running, "turning new song notices off stops that reader again")
             for automatic in [false, true] {
                 defaults.set(automatic, forKey: DefaultsKey.notchShowPlayingMusic)
                 for module in [NotchModule.music, .controls] {

@@ -37,6 +37,11 @@ final class ScreenshotQuickPreviewController {
     private let action: (Action) -> Set<Action>
     private let share: (ScreenshotShareDuration,
                         @escaping @MainActor (ScreenshotShareRecord?) -> Void) -> Void
+    /// Writes the capture as it would be saved into a temporary file for the
+    /// system share sheet.
+    private let shareFile: () -> URL?
+    private let shareAnchor = ShelfSharePickerAnchor.Anchor()
+    private var systemSharing = false
     private let onClose: () -> Void
     private let model = ScreenshotQuickPreviewModel()
     private var panel: ScreenshotQuickPreviewPanel?
@@ -60,12 +65,14 @@ final class ScreenshotQuickPreviewController {
          action: @escaping (Action) -> Set<Action>,
          share: @escaping (ScreenshotShareDuration,
                            @escaping @MainActor (ScreenshotShareRecord?) -> Void) -> Void,
+         shareFile: @escaping () -> URL?,
          onClose: @escaping () -> Void) {
         self.capture = capture
         self.strings = strings
         self.defaultAction = defaultAction
         self.action = action
         self.share = share
+        self.shareFile = shareFile
         self.onClose = onClose
     }
 
@@ -86,6 +93,8 @@ final class ScreenshotQuickPreviewController {
                     ?? NSItemProvider()
             },
             share: { [weak self] duration in self?.performShare(duration) },
+            systemShare: { [weak self] in self?.performSystemShare() },
+            shareAnchor: shareAnchor,
             copySharedLink: { [weak self] in self?.copySharedLink() },
             deleteSharedLink: { [weak self] in self?.deleteSharedLink() },
             showQR: { [weak self] in self?.showQRResult() },
@@ -264,6 +273,30 @@ final class ScreenshotQuickPreviewController {
         }
     }
 
+    /// The system share sheet: AirDrop, messages and every other target the
+    /// Mac offers. The preview waits while the sheet is up, and a chosen
+    /// target finishes it the way Copy does.
+    private func performSystemShare() {
+        guard !closed, !systemSharing else { return }
+        dismissWork?.cancel()
+        dismissWork = nil
+        guard let url = shareFile() else {
+            NSSound.beep()
+            scheduleAutoDismiss()
+            return
+        }
+        systemSharing = true
+        let shown = shareAnchor.present([url]) { [weak self] chosen in
+            guard let self else { return }
+            self.systemSharing = false
+            if chosen { self.close() } else { self.scheduleAutoDismiss() }
+        }
+        if !shown {
+            systemSharing = false
+            scheduleAutoDismiss()
+        }
+    }
+
     private func performShare(_ duration: ScreenshotShareDuration) {
         guard !closed, !model.sharing else { return }
         dismissWork?.cancel()
@@ -384,7 +417,7 @@ final class ScreenshotQuickPreviewController {
     }
 
     private func scheduleAutoDismiss() {
-        guard !closed, !pointerInside, !model.sharing, !model.deletingShare else { return }
+        guard !closed, !pointerInside, !systemSharing, !model.sharing, !model.deletingShare else { return }
         dismissWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.close() }
         dismissWork = work
@@ -399,6 +432,16 @@ final class ScreenshotQuickPreviewController {
                   !ShortcutCapture.isCapturing else { return event }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             let key = Int(event.keyCode)
+            if flags.intersection([.command, .option, .shift, .control]) == .command {
+                let text = event.charactersIgnoringModifiers?.folding(
+                    options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+                let letter = text?.count == 1 ? text?.first : nil
+                let isLatinLetter = letter.map { $0.isASCII && $0.isLetter } ?? false
+                if isLatinLetter ? letter == "w" : key == kVK_ANSI_W {
+                    self.close()
+                    return nil
+                }
+            }
             if flags.contains(.command) {
                 switch key {
                 case kVK_ANSI_C:
@@ -436,7 +479,7 @@ final class ScreenshotQuickPreviewController {
     }
 }
 
-private final class ScreenshotQuickPreviewPanel: NSPanel {
+private final class ScreenshotQuickPreviewPanel: OverlayPanel {
     override var canBecomeKey: Bool { true }
 
     /// The preview shows up unasked for, so presenting it leaves the keyboard
@@ -461,6 +504,8 @@ private struct ScreenshotQuickPreviewView: View {
     let perform: (ScreenshotQuickPreviewController.Action) -> Void
     let dragItem: () -> NSItemProvider
     let share: (ScreenshotShareDuration) -> Void
+    let systemShare: () -> Void
+    let shareAnchor: ShelfSharePickerAnchor.Anchor
     let copySharedLink: () -> Void
     let deleteSharedLink: () -> Void
     let showQR: () -> Void
@@ -507,6 +552,16 @@ private struct ScreenshotQuickPreviewView: View {
                          disabled: model.disabledActions.contains(.copy)) {
                 perform(.copy)
             }
+            if embedded {
+                Button(action: systemShare) {
+                    Image(systemName: "square.and.arrow.up").frame(width: 28, height: 28)
+                }
+                .modifier(ScreenshotPreviewActionStyle(embedded: true))
+                .controlSize(.small)
+                .background(ShelfSharePickerAnchor(anchor: shareAnchor))
+                .screenshotSafeHelp(strings.shareButton)
+                .accessibilityLabel(strings.shareButton)
+            }
             if sharingEnabled, model.sharedRecord == nil {
                 shareMenu
             }
@@ -533,11 +588,21 @@ private struct ScreenshotQuickPreviewView: View {
         }
     }
 
-    private var thumbnailPinButton: some View {
-        Button {
-            perform(.pin)
-        } label: {
-            Image(systemName: "pin")
+    private var thumbnailButtons: some View {
+        HStack(spacing: 5) {
+            thumbnailButton(symbol: "square.and.arrow.up", title: strings.shareButton,
+                            action: systemShare)
+                .background(ShelfSharePickerAnchor(anchor: shareAnchor))
+            thumbnailButton(symbol: "pin", title: strings.pinButton) { perform(.pin) }
+        }
+        .padding(6)
+    }
+
+    private func thumbnailButton(symbol: String,
+                                 title: String,
+                                 action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .frame(width: 24, height: 24)
                 .background(.regularMaterial, in: Circle())
@@ -545,9 +610,8 @@ private struct ScreenshotQuickPreviewView: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .padding(6)
-        .screenshotSafeHelp(strings.pinButton)
-        .accessibilityLabel(strings.pinButton)
+        .screenshotSafeHelp(title)
+        .accessibilityLabel(title)
     }
 
     private var preview: some View {
@@ -574,9 +638,9 @@ private struct ScreenshotQuickPreviewView: View {
             .accessibilityLabel(strings.editButton)
             .overlay(alignment: .topTrailing) {
                 // The floating action row already fills its fixed width in
-                // longer languages, so the pin rides on the thumbnail there
-                // instead of squeezing Save, Copy and Edit.
-                if !embedded { thumbnailPinButton }
+                // longer languages, so share and pin ride on the thumbnail
+                // there instead of squeezing Save, Copy and Edit.
+                if !embedded { thumbnailButtons }
             }
 
             if let record = model.sharedRecord {
@@ -705,8 +769,8 @@ private struct ScreenshotQuickPreviewView: View {
         }
         .disabled(model.sharing)
         .screenshotSafeHelp(model.sharing ? strings.sharingHUD
-            : "\(strings.shareButton) · \(ScreenshotShareDuration.saved().title(strings))")
-        .accessibilityLabel(strings.shareButton)
+            : "\(strings.shareSectionTitle) · \(ScreenshotShareDuration.saved().title(strings))")
+        .accessibilityLabel(strings.shareSectionTitle)
     }
 
     private func actionButton(symbol: String,

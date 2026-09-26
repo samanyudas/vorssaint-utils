@@ -26,6 +26,7 @@ final class MenuPanelFocus: ObservableObject {
     @Published private(set) var request: MenuPanelFocusRequest?
     @Published private(set) var activeMetric: MetricDetailKind?
     @Published private(set) var isSwitchingMetricAnchor = false
+    @Published private(set) var popoverIsVisible = false
     private var serial = 0
 
     private init() {}
@@ -55,6 +56,11 @@ final class MenuPanelFocus: ObservableObject {
     func setSwitchingMetricAnchor(_ switching: Bool) {
         isSwitchingMetricAnchor = switching
     }
+
+    func setPopoverVisible(_ visible: Bool) {
+        guard popoverIsVisible != visible else { return }
+        popoverIsVisible = visible
+    }
 }
 
 /// Content of the menu bar popover: keep-awake controls, the volume mixer and
@@ -78,6 +84,7 @@ struct MenuPanelView: View {
     @AppStorage(DefaultsKey.panelShowUtilities) private var showUtilities = true
     @AppStorage(DefaultsKey.panelShowControls) private var showControls = true
     @AppStorage(DefaultsKey.panelShowToggles) private var showToggles = true
+    @AppStorage(DefaultsKey.panelShowWallpaper) private var showWallpaper = true
     @AppStorage(DefaultsKey.panelSectionOrder) private var sectionOrderRaw = ""
     @State private var navigableContentHeight: CGFloat = 0
     @State private var metricContentHeight: CGFloat = 0
@@ -292,6 +299,7 @@ struct MenuPanelView: View {
         case .utilities: return 500
         case .controls: return 360
         case .toggles: return 420
+        case .wallpaper: return 480
         }
     }
 
@@ -302,7 +310,7 @@ struct MenuPanelView: View {
         case .network: return 330
         case .disk: return 360
         case .battery, .power: return 360
-        case .fan: return 240
+        case .fan, .connectedDevices: return 240
         }
     }
 
@@ -314,15 +322,31 @@ struct MenuPanelView: View {
         switch id {
         case .keepAwake: KeepAwakeCard(collapsible: collapsible)
         case .brightness: if showBrightness { BrightnessSection(collapsible: collapsible) }
-        case .mixer: if showMixer { MixerSection(collapsible: collapsible) }
+        case .mixer: if showMixer { mixerOrPrioritySection(collapsible: collapsible) }
         case .system: if showSystem { SystemSection(collapsible: collapsible) }
         case .network: if showNetwork { NetworkSection(collapsible: collapsible) }
         case .disk: if showDisk { DiskSection(collapsible: collapsible) }
         case .power: if showPower { PowerSection(collapsible: collapsible) }
-        case .fanControl: if showFanControl { FanControlSection(collapsible: collapsible) }
+        case .fanControl:
+            // The popover retains its host after closing; detach the curve editor
+            // so cooling heartbeats cannot keep laying out an unseen panel.
+            if showFanControl, notchSize != nil || panelFocus.popoverIsVisible {
+                FanControlSection(collapsible: collapsible)
+            }
         case .utilities: UtilitiesSection(collapsible: collapsible, startCleaning: startCleaning)
         case .controls: QuickControlsSection(collapsible: collapsible)
         case .toggles: QuickTogglesSection(collapsible: collapsible)
+        case .wallpaper: if showWallpaper { WallpaperSection(collapsible: collapsible) }
+        }
+    }
+
+    /// Shows the full mixer when installed, or the priority lists on their own.
+    @ViewBuilder
+    private func mixerOrPrioritySection(collapsible: Bool) -> some View {
+        if AppFeature.mixer.isAvailable {
+            MixerSection(collapsible: collapsible)
+        } else {
+            AudioPrioritySection(collapsible: collapsible)
         }
     }
 
@@ -330,7 +354,7 @@ struct MenuPanelView: View {
     /// what keeps the tabs refreshing when Settings flips one of them.
     private func isSectionVisible(_ id: PanelSectionID) -> Bool {
         _ = (showKeepAwake, showBrightness, brightnessEnabled, showMixer, showSystem, showNetwork,
-             showDisk, showPower, showFanControl, showUtilities, showControls, showToggles)
+             showDisk, showPower, showFanControl, showUtilities, showControls, showToggles, showWallpaper)
         return PanelLayout.isVisibleInPanel(id)
     }
 

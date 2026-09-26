@@ -345,6 +345,14 @@ enum NotchTests {
             measurements.height(displayID: id, frame: frame, visibleTop: frame.maxY - gap,
                                 scale: scale, statusBarThickness: fallback)
         }
+        for gap: CGFloat in [16, 24, 37, 64] {
+            suite.expect(NotchMenuBarMeasurements.showsBar(frame: screen, visibleTop: screen.maxY - gap),
+                   "a bar reserving its height at the top of the visible frame is on screen")
+        }
+        for gap: CGFloat in [0, 1, -10, 15, 65, 600, .nan, .infinity] {
+            suite.expect(!NotchMenuBarMeasurements.showsBar(frame: screen, visibleTop: screen.maxY - gap),
+                   "a bar that hides until revealed, or a display without one, reserves no room")
+        }
         for height: CGFloat in [16, 22, 24, 28, 30, 32, 33, 37, 64] {
             suite.expect(read(1, gap: height) == height, "the selected display's current visible bar supplies its height")
             let geometry = NotchGeometry(screen: screen, safeAreaTop: 0, cameraWidth: 0, menuBarHeight: height)
@@ -477,6 +485,63 @@ enum NotchTests {
             defaults.set(value, forKey: key)
         }
         for (key, value) in AppFeature.availabilityDefaults { defaults.set(value, forKey: key) }
+        let firstInstall = "com.vorssaint.tests.notch-new-\(UUID().uuidString)"
+        let fresh = UserDefaults(suiteName: firstInstall)!
+        defer { fresh.removePersistentDomain(forName: firstInstall) }
+        fresh.set(NotchControlItem.defaultHidden, forKey: DefaultsKey.notchHiddenControls)
+        fresh.set(true, forKey: DefaultsKey.notchScratchpadControlHidden)
+        Defaults.migrateExistingNotchDefaults(in: fresh, domainName: firstInstall)
+        let firstDefaults = Defaults.registeredDefaults
+        suite.expect(fresh.persistentDomain(forName: firstInstall)?[DefaultsKey.notchSize] == nil
+                     && !fresh.bool(forKey: DefaultsKey.notchInitialExtensionsInstalled)
+                     && firstDefaults[DefaultsKey.notchSize] as? String == NotchSize.compact.rawValue
+                     && firstDefaults[DefaultsKey.notchOpenOnHover] as? Bool == false
+                     && firstDefaults[DefaultsKey.notchAppPanel] as? Bool == false,
+                     "a first island setup starts compact, opens by click and uses a separate app panel")
+        suite.expect(firstDefaults[DefaultsKey.notchGesturesEnabled] as? Bool == true
+                     && firstDefaults[DefaultsKey.notchHapticFeedback] as? Bool == true
+                     && firstDefaults[DefaultsKey.notchReturnHome] as? Bool == false
+                     && firstDefaults[DefaultsKey.notchCoversMenus] as? Bool == true,
+                     "gestures, haptics, last page and coverage over menus start selected")
+        let enabledByDefault = [DefaultsKey.notchNotificationsEnabled, DefaultsKey.notchCameraEnabled,
+                                DefaultsKey.notchAgentsEnabled, DefaultsKey.notchDownloadsEnabled,
+                                DefaultsKey.notchLyricsEnabled, DefaultsKey.notchQueueEnabled,
+                                DefaultsKey.notchKeyboardLight,
+                                DefaultsKey.notchAccessoriesEnabled, DefaultsKey.notchClipboard,
+                                DefaultsKey.notchCapture, DefaultsKey.notchTrackChange]
+        suite.expect(enabledByDefault.allSatisfy { firstDefaults[$0] as? Bool == true },
+                     "installed island sections and activity indicators start enabled")
+        suite.expect(firstDefaults[DefaultsKey.notchLiveEqualizer] as? Bool == false,
+                     "the live equalizer starts off because it asks for system audio recording")
+
+        let priorInstall = "com.vorssaint.tests.notch-existing-\(UUID().uuidString)"
+        let existing = UserDefaults(suiteName: priorInstall)!
+        defer { existing.removePersistentDomain(forName: priorInstall) }
+        existing.set(true, forKey: DefaultsKey.notchEnabled)
+        existing.set(NotchSize.custom.rawValue, forKey: DefaultsKey.notchSize)
+        existing.set(true, forKey: DefaultsKey.notchNotificationsEnabled)
+        Defaults.migrateExistingNotchDefaults(in: existing, domainName: priorInstall)
+        suite.expect(existing.string(forKey: DefaultsKey.notchSize) == NotchSize.custom.rawValue
+                     && existing.bool(forKey: DefaultsKey.notchInitialExtensionsInstalled)
+                     && existing.bool(forKey: DefaultsKey.notchNotificationsEnabled)
+                     && existing.bool(forKey: DefaultsKey.notchOpenOnHover)
+                     && existing.bool(forKey: DefaultsKey.notchAppPanel)
+                     && !existing.bool(forKey: DefaultsKey.notchAgentsEnabled),
+                     "updating a configured island keeps explicit choices and previous implicit defaults")
+        existing.removeObject(forKey: DefaultsKey.notchAppPanel)
+        Defaults.migrateExistingNotchDefaults(in: existing, domainName: priorInstall)
+        suite.expect(!existing.bool(forKey: DefaultsKey.notchAppPanel),
+                     "the one-time migration does not run again after a later preference change")
+
+        let priorChoice = "com.vorssaint.tests.notch-choice-\(UUID().uuidString)"
+        let configured = UserDefaults(suiteName: priorChoice)!
+        defer { configured.removePersistentDomain(forName: priorChoice) }
+        configured.set(true, forKey: DefaultsKey.notchReturnHome)
+        Defaults.migrateExistingNotchDefaults(in: configured, domainName: priorChoice)
+        suite.expect(configured.bool(forKey: DefaultsKey.notchOpenOnHover)
+                     && configured.bool(forKey: DefaultsKey.notchReturnHome),
+                     "a saved island choice stays configured even if the master switch was never used")
+
         suite.expect(!NotchSupport.isEnabled(in: defaults), "notch is opt-in")
         suite.expect(NotchSupport.controls(in: defaults) == [.volume, .brightness, .music, .mixer, .keepAwake, .timer, .calendar],
                "home defaults prioritize playback and everyday system controls")
@@ -513,10 +578,11 @@ enum NotchTests {
         defaults.set(true, forKey: DefaultsKey.notchShowInCaptures)
         suite.expect(!NotchSupport.hidesUntilHover(in: defaults), "the closed island stays in sight by default")
         defaults.set(true, forKey: DefaultsKey.notchHideUntilHover)
+        suite.expect(!NotchSupport.hidesUntilHover(in: defaults), "click to open does not hide the island until hover")
+        defaults.set(true, forKey: DefaultsKey.notchOpenOnHover)
         suite.expect(NotchSupport.hidesUntilHover(in: defaults), "hidden until hover waits out of sight for the pointer")
         defaults.set(false, forKey: DefaultsKey.notchOpenOnHover)
         suite.expect(!NotchSupport.hidesUntilHover(in: defaults), "an island that opens by click never waits for hover")
-        defaults.set(true, forKey: DefaultsKey.notchOpenOnHover)
         defaults.set(false, forKey: DefaultsKey.notchHideUntilHover)
         suite.expect(NotchEvent.allCases.allSatisfy { !NotchSupport.routes($0, in: defaults) },
                "disabled notch cannot consume any existing presentation")
@@ -533,11 +599,11 @@ enum NotchTests {
         defaults.set(true, forKey: DefaultsKey.notchEnabled)
         suite.expect(NotchSupport.usesHapticFeedback(in: defaults), "disabling the notch preserves the user's tactile preference")
         suite.expect(NotchSupport.idleContent(in: defaults) == .music, "a new island shows playing music at rest")
-        suite.expect(defaults.string(forKey: DefaultsKey.notchSize) == NotchSize.spacious.rawValue
-               && defaults.bool(forKey: DefaultsKey.notchOpenOnHover)
-               && defaults.bool(forKey: DefaultsKey.notchHoverExpands),
-               "a new island starts spacious and expands on hover")
+        suite.expect(defaults.string(forKey: DefaultsKey.notchSize) == NotchSize.compact.rawValue
+               && !defaults.bool(forKey: DefaultsKey.notchOpenOnHover),
+               "a new island starts compact and opens by click")
         suite.expect(!defaults.bool(forKey: DefaultsKey.notchHideUntilHover), "hidden hover is opt-in")
+        suite.expect(!defaults.bool(forKey: DefaultsKey.notchOutlineEnabled), "the island outline is opt-in")
         suite.expect(defaults.double(forKey: DefaultsKey.notchHoverDelay) == 0.25,
                "hover activation defaults to a deliberate quarter-second pause")
         for value in [0.10, 0.25, 0.65, 1.0] {
@@ -548,10 +614,15 @@ enum NotchTests {
                "hover activation times stay within usable bounds")
         suite.expect([Double.nan, .infinity, -.infinity].allSatisfy { NotchSupport.sanitizedHoverDelay($0) == 0.25 },
                "non-finite hover activation times fall back to the default")
-        suite.expect(NotchSupport.routesAppPanel(in: defaults) && NotchSupport.routesQuickPanel(in: defaults)
+        suite.expect(!NotchSupport.routesAppPanel(in: defaults) && NotchSupport.routesQuickPanel(in: defaults)
                && NotchSupport.routesClipboardWindow(in: defaults) && NotchSupport.routesShelf(in: defaults)
                && NotchSupport.routesCaptureControls(in: defaults),
-               "enabling a fresh island routes available panels into it")
+               "enabling a fresh island keeps the app panel separate and routes the other available panels into it")
+        suite.expect(NotchSupport.routes(.track, in: defaults), "a new song shows by default while music is on")
+        defaults.set("music", forKey: DefaultsKey.notchHiddenModules)
+        suite.expect(!NotchSupport.routes(.track, in: defaults), "a hidden music section announces no new song")
+        defaults.set("", forKey: DefaultsKey.notchHiddenModules)
+        defaults.set(false, forKey: DefaultsKey.notchTrackChange)
         let initialLayout = NotchQuickAccessConfiguration.current(in: defaults)
         suite.expect(initialLayout.buttons.filter { $0.side == .left }.compactMap(\.action) == [.explore, .module(.timer)]
                && initialLayout.buttons.filter { $0.side == .right }.compactMap(\.action) == [.settings, .module(.mixer)]
@@ -688,6 +759,22 @@ enum NotchTests {
                && NotchSupport.adjacentModule(to: .camera, modules: [.files], backwards: true) == .files
                && NotchSupport.adjacentModule(to: nil, modules: [], backwards: false) == nil,
                "reverse cycling, removed selections and an empty gallery have safe destinations")
+        suite.expect(NotchSupport.steppedItem(from: nil, in: [1, 2, 3], backwards: false) == 1
+               && NotchSupport.steppedItem(from: nil, in: [1, 2, 3], backwards: true) == 1
+               && NotchSupport.steppedItem(from: 1, in: [1, 2, 3], backwards: false) == 2
+               && NotchSupport.steppedItem(from: 3, in: [1, 2, 3], backwards: false) == 3
+               && NotchSupport.steppedItem(from: 1, in: [1, 2, 3], backwards: true) == 1
+               && NotchSupport.steppedItem(from: 9, in: [1, 2, 3], backwards: true) == 1
+               && NotchSupport.steppedItem(from: 1, in: [Int](), backwards: false) == nil,
+               "clipboard arrow keys start at the top result, stop at the ends and recover from a filtered-out row")
+        suite.expect(NotchSupport.searchHighlight(keeping: nil, in: [1, 2, 3], query: "note") == 1
+               && NotchSupport.searchHighlight(keeping: nil, in: [1, 2, 3], query: " \n ") == nil
+               && NotchSupport.searchHighlight(keeping: 2, in: [1, 2, 3], query: "note") == 2
+               && NotchSupport.searchHighlight(keeping: 2, in: [1, 2, 3], query: "") == 2
+               && NotchSupport.searchHighlight(keeping: 9, in: [1, 2, 3], query: "note") == 1
+               && NotchSupport.searchHighlight(keeping: 9, in: [1, 2, 3], query: "") == nil
+               && NotchSupport.searchHighlight(keeping: nil, in: [Int](), query: "note") == nil,
+               "a typed clipboard search highlights its top result for Return, and an empty one waits for an arrow")
         suite.expect(NotchSupport.filteredModules([.controls, .music, .files], query: "  MÚSＩCA  ", title: {
             $0 == .music ? "Música" : "Arquivos"
         }) == [.music], "gallery search ignores accents, letter case, character width and surrounding spaces")
@@ -743,12 +830,10 @@ enum NotchTests {
             suite.expect(tool.capturesAudio == (tool == .recording),
                    "only screen recording shows microphone and system-audio controls: \(tool.rawValue)")
         }
-        suite.expect(!NotchSupport.routes(.clipboard, in: defaults) && !NotchSupport.routes(.capture, in: defaults),
-               "notch opt-in does not reveal copied content or move captures")
-        defaults.set(true, forKey: DefaultsKey.notchClipboard)
-        suite.expect(!NotchSupport.routes(.clipboard, in: defaults), "clipboard event respects the history capture switch")
+        suite.expect(!NotchSupport.routes(.clipboard, in: defaults) && NotchSupport.routes(.capture, in: defaults),
+               "clipboard activity still needs history capture while installed captures start enabled")
         defaults.set(true, forKey: DefaultsKey.clipboardHistoryEnabled)
-        suite.expect(NotchSupport.routes(.clipboard, in: defaults), "explicit clipboard activity opt-in is honored")
+        suite.expect(NotchSupport.routes(.clipboard, in: defaults), "installed clipboard activity starts once history capture is enabled")
         suite.expect(NotchSupport.routesScratchpad(in: defaults), "Scratchpad defaults to its visible island page")
         defaults.set(false, forKey: DefaultsKey.notchScratchpad)
         suite.expect(!NotchSupport.routesScratchpad(in: defaults), "Scratchpad can use its separate window without hiding its page")
@@ -767,13 +852,17 @@ enum NotchTests {
         suite.expect(!NotchSupport.routesClipboardWindow(in: defaults), "hidden clipboard keeps the ordinary history available")
         suite.expect(!NotchSupport.routes(.clipboard, in: defaults), "hidden module cannot leak an activity")
         defaults.set("system,music,music,unknown", forKey: DefaultsKey.notchModuleOrder)
-        suite.expect(NotchSupport.modules(in: defaults) == [.system, .music, .controls, .mixer, .captures, .files, .tools, .calendar, .timer, .downloads, .scratchpad],
+        suite.expect(NotchSupport.modules(in: defaults) == [.system, .music, .controls, .mixer, .captures, .files, .tools, .calendar, .notifications, .timer, .camera, .downloads, .scratchpad, .agents],
                "module order ignores unknown ids and duplicates, preserving newly added modules")
         suite.expect(NotchSupport.routesShelf(in: defaults) && NotchSupport.revealsShelfDrag(in: defaults),
                "the enabled notch replaces the file destination and reveals active drags")
         defaults.set(false, forKey: DefaultsKey.notchDragReveal)
         suite.expect(NotchSupport.routesShelf(in: defaults) && !NotchSupport.revealsShelfDrag(in: defaults),
                "drag reveal can be disabled without moving the shelf")
+        defaults.set(false, forKey: DefaultsKey.notchShelf)
+        suite.expect(NotchSupport.showsFiles(in: defaults) && !NotchSupport.routesShelf(in: defaults),
+               "choosing a separate window keeps the choice on offer while the shelf stays out of the island")
+        defaults.set(true, forKey: DefaultsKey.notchShelf)
         defaults.set(false, forKey: DefaultsKey.notchCaptureControls)
         suite.expect(!NotchSupport.routesCaptureControls(in: defaults), "capture controls retain an independent destination")
         defaults.set(false, forKey: AppFeature.quickLauncher.availabilityKey)
@@ -789,17 +878,18 @@ enum NotchTests {
         suite.expect(NotchEvent.allCases.allSatisfy { !NotchSupport.routes($0, in: defaults) },
                "hub removal gates every notch event")
 
-        let keys: Set<String> = [DefaultsKey.notchShowPlayingMusic, DefaultsKey.notchShowInCaptures, DefaultsKey.notchIdleContent, DefaultsKey.notchHiddenControls, DefaultsKey.notchControlOrder, DefaultsKey.notchSize, DefaultsKey.notchShelf, DefaultsKey.notchDragReveal,
+        let keys: Set<String> = [DefaultsKey.notchShowPlayingMusic, DefaultsKey.notchShowInCaptures, DefaultsKey.notchIdleContent, DefaultsKey.notchHiddenControls, DefaultsKey.notchControlOrder, DefaultsKey.notchSize, DefaultsKey.notchOutlineEnabled, DefaultsKey.notchShelf, DefaultsKey.notchDragReveal,
                                 DefaultsKey.notchCustomWidth, DefaultsKey.notchCustomHeight, DefaultsKey.notchHapticFeedback,
-                                DefaultsKey.notchCaptureControls, DefaultsKey.notchQuickPanel, DefaultsKey.notchAppPanel, DefaultsKey.notchScratchpad,
+                                DefaultsKey.notchCaptureControls, DefaultsKey.notchQuickPanel, DefaultsKey.notchAppPanel,
+                                DefaultsKey.notchHidesMenuBarIcon, DefaultsKey.notchScratchpad,
                                 DefaultsKey.notchHoverExpands, DefaultsKey.notchEnabled, DefaultsKey.notchDisplay,
                                 DefaultsKey.notchOpenOnHover, DefaultsKey.notchHoverDelay, DefaultsKey.notchHideUntilHover, DefaultsKey.notchHiddenModules,
                                 DefaultsKey.notchModuleOrder, DefaultsKey.notchQuickAccessLayout, DefaultsKey.notchQuickAccessSide, DefaultsKey.notchQuickAccessSecond, DefaultsKey.notchQuickAccessThird, DefaultsKey.notchVolume,
                                 DefaultsKey.notchBrightness, DefaultsKey.notchBattery,
                                 DefaultsKey.notchClipboard, DefaultsKey.notchClipboardWindow, DefaultsKey.notchCapture,
-                                DefaultsKey.notchMusicActivity, DefaultsKey.notchHideInCaptures, DefaultsKey.panelControlNotch,
+                                DefaultsKey.notchTrackChange, DefaultsKey.notchMusicActivity, DefaultsKey.notchHideInCaptures, DefaultsKey.panelControlNotch,
                                 AppFeature.notch.availabilityKey]
-        suite.expect(SettingsBackupSupport.exportKeys().isSuperset(of: keys), "every notch preference travels in backup")
+        suite.expect(SettingsBackupSupport.exportKeys().isSuperset(of: keys), "every portable notch preference travels in backup")
         let restored = SettingsBackupSupport.sanitizedSettings(from: [
             SettingsBackupSupport.formatVersionKey: SettingsBackupSupport.formatVersion,
             SettingsBackupSupport.settingsKey: [DefaultsKey.notchEnabled: true,
@@ -807,6 +897,7 @@ enum NotchTests {
                                                 DefaultsKey.notchSize: "custom",
                                                 DefaultsKey.notchCustomWidth: 390.0,
                                                 DefaultsKey.notchCustomHeight: 580.0,
+                                                DefaultsKey.notchOutlineEnabled: true,
                                                 DefaultsKey.notchHapticFeedback: true,
                                                 DefaultsKey.notchHiddenModules: "clipboard",
                                                 DefaultsKey.notchVolume: false,
@@ -821,8 +912,9 @@ enum NotchTests {
         suite.expect(restored?[DefaultsKey.notchSize] as? String == "custom"
                && restored?[DefaultsKey.notchCustomWidth] as? Double == 390
                && restored?[DefaultsKey.notchCustomHeight] as? Double == 580
+               && restored?[DefaultsKey.notchOutlineEnabled] as? Bool == true
                && restored?[DefaultsKey.notchHapticFeedback] as? Bool == true,
-               "backup restores custom dimensions and tactile feedback together")
+               "backup restores custom dimensions, outline and tactile feedback together")
         suite.expect(restored?[DefaultsKey.notchQuickAccessSide] as? String == "right"
                && restored?[DefaultsKey.notchQuickAccessSecond] as? String == "timer"
                && restored?[DefaultsKey.notchQuickAccessThird] as? String == "settings",
@@ -1168,23 +1260,91 @@ enum NotchTests {
         suite.expect(NotchMotion.duration(from: roomy.notice, to: idle)
                < NotchMotion.duration(from: idle, to: roomy.notice),
                "horizontal dismissal remains quicker than opening")
+        for (from, to) in [(roomy.collapsed, roomy.expanded), (idle, roomy.notice), (roomy.expanded, roomy.collapsed),
+                           (roomy.notice, idle), (CGSize(width: roomy.collapsed.width, height: 0), roomy.peek),
+                           (roomy.expanded, CGSize(width: roomy.collapsed.width, height: 0))] {
+            let motion = NotchMotion.frames(from: from, to: to)
+            let envelope = NotchMotion.envelope(from: from, to: to)
+            let widest = motion.sizes.map(\.width).max() ?? 0
+            let tallest = motion.sizes.map(\.height).max() ?? 0
+            suite.expect(motion.sizes.first == from && motion.sizes.last == to
+                   && motion.keyTimes.first == 0 && motion.keyTimes.last == 1 && motion.keyTimes.count == motion.sizes.count,
+                   "the island's motion starts on screen and ends exactly at its target")
+            suite.expect(widest <= envelope.width && tallest <= envelope.height,
+                   "the reserved backing area holds every frame of the swing")
+            suite.expect(envelope.width <= max(from.width, to.width) + NotchMotion.overshootLimit
+                   && envelope.height <= max(from.height, to.height) + NotchMotion.overshootLimit,
+                   "a long travel swings no farther than the room kept around the island")
+            suite.expect(motion.duration > 0.1 && motion.duration < 0.6,
+                   "the island settles within the time its surroundings wait for it: \(motion.duration)")
+            suite.expect(motion.sizes.allSatisfy { $0.height >= 0 && $0.width >= 0 }, "no frame turns inside out")
+            if to.width < from.width {
+                suite.expect(motion.sizes.allSatisfy { $0.width >= to.width - 0.001 },
+                       "a narrowing island never passes its resting width beside the camera")
+            }
+            if to.height < from.height {
+                suite.expect(motion.sizes.allSatisfy { $0.height >= to.height - 0.001 },
+                       "a shortening island never passes its resting height")
+            }
+            if to.width > from.width + 40 {
+                suite.expect(widest > to.width, "a widening island stretches past its size before settling")
+            }
+            if to.height > from.height + 40 {
+                suite.expect(tallest > to.height, "a lengthening island stretches past its size before settling")
+            }
+        }
+        let long = NotchMotion.envelope(from: CGSize(width: 200, height: 32), to: CGSize(width: 1_400, height: 900))
+        suite.expect(long.width <= 1_400 + NotchMotion.overshootLimit && long.height <= 900 + NotchMotion.overshootLimit
+               && long.width > 1_400 && long.height > 900,
+               "a long travel keeps its stretch within the room kept around the island")
+        let drop = NotchMotion.frames(from: roomy.collapsed, to: roomy.expanded)
+        let early = drop.sizes[drop.sizes.count / 8]
+        suite.expect((early.height - roomy.collapsed.height) / (roomy.expanded.height - roomy.collapsed.height)
+               > (early.width - roomy.collapsed.width) / (roomy.expanded.width - roomy.collapsed.width),
+               "an opening island drops a little ahead of widening")
+        let arrival = NotchMotion.arrivalTime(from: roomy.collapsed, to: roomy.expanded)
+        let arrived = NotchMotion.size(at: arrival, from: roomy.collapsed, to: roomy.expanded)
+        suite.expect(arrival > 0 && arrival < drop.duration
+               && roomy.expanded.width - arrived.width <= (roomy.expanded.width - roomy.collapsed.width) * 0.01
+               && roomy.expanded.height - arrived.height <= (roomy.expanded.height - roomy.collapsed.height) * 0.01,
+               "floating controls emerge once the island reaches its size, before its swing settles")
+        let horizontal = NotchMotion.frames(from: idle, to: roomy.notice)
+        suite.expect(horizontal.sizes.allSatisfy { $0.height == idle.height },
+               "horizontal feedback never swings below the menu bar")
+        suite.expect(NotchMotion.envelope(from: roomy.expanded, to: roomy.expanded) == roomy.expanded,
+               "an unchanged size reserves nothing more")
+        for reserved in [CGSize(width: 571, height: 336), CGSize(width: 571.5, height: 40), CGSize(width: 300, height: 32)] {
+            for size in [CGSize(width: 278, height: 32), CGSize(width: 277.5, height: 38), CGSize(width: 300, height: 32)] {
+                let centred = NotchMotion.reservation(reserved, centring: size)
+                let margin = (centred.width - size.width) / 2
+                suite.expect(centred.width >= reserved.width && centred.height >= max(reserved.height, size.height)
+                       && margin >= 0 && margin == margin.rounded(),
+                       "a reserved window keeps whole, equal margins so the settled island does not shift a pixel")
+            }
+        }
         func near(_ value: CGFloat, _ expected: CGFloat) -> Bool { abs(value - expected) < 0.000_1 }
         let closing = NotchGlassFade.plan(from: 200, to: 32, endsInGlass: false, current: 1)
-        suite.expect(near(closing.openness(atHeight: 200), 1) && near(closing.openness(atHeight: 80), 1)
-                && near(closing.openness(atHeight: 56), 0.5) && near(closing.openness(atHeight: 32), 0),
-               "settled glass closing into a black strip darkens only over the last stretch and arrives black")
+        suite.expect(near(closing.openness(atHeight: 200), 0) && near(closing.openness(atHeight: 80), 0)
+                && near(closing.openness(atHeight: 32), 0),
+               "settled glass closing into a black strip shuts at once, since its page has already left")
         let opening = NotchGlassFade.plan(from: 32, to: 200, endsInGlass: true, current: 0)
-        suite.expect(near(opening.openness(atHeight: 32), 0) && near(opening.openness(atHeight: 56), 0.5)
-                && near(opening.openness(atHeight: 80), 1) && near(opening.openness(atHeight: 200), 1),
-               "glass leaving a black strip opens up over the first stretch")
-        let reopened = NotchGlassFade.plan(from: 56, to: 200, endsInGlass: true,
-                                           current: closing.openness(atHeight: 56))
+        suite.expect(near(opening.openness(atHeight: 32), 0) && near(opening.openness(atHeight: 152), 0)
+                && near(opening.openness(atHeight: 176), 0.5) && near(opening.openness(atHeight: 200), 1),
+               "glass leaving a black strip stays shut until the last stretch, where its page fades in")
+        let short = NotchGlassFade.plan(from: 32, to: 56, endsInGlass: true, current: 0)
+        suite.expect(near(short.openness(atHeight: 32), 0) && near(short.openness(atHeight: 56), 1),
+               "glass growing less than the stretch opens over its whole travel")
+        let reopened = NotchGlassFade.plan(from: 56, to: 200, endsInGlass: true, current: 0.5)
         suite.expect(near(reopened.openness(atHeight: 56), 0.5) && near(reopened.openness(atHeight: 200), 1),
                "a close reversed halfway reopens from the openness on screen and ends fully open")
-        let reclosed = NotchGlassFade.plan(from: 44, to: 32, endsInGlass: false,
-                                           current: opening.openness(atHeight: 44))
-        suite.expect(near(reclosed.openness(atHeight: 44), 0.25) && near(reclosed.openness(atHeight: 32), 0),
-               "an opening reversed early closes from the openness on screen and ends black")
+        let partlyOpen = opening.openness(atHeight: 180)
+        let retargeted = NotchGlassFade.plan(from: 180, to: 220, endsInGlass: true, current: partlyOpen)
+        suite.expect(near(retargeted.openness(atHeight: 180), partlyOpen)
+               && near(retargeted.openness(atHeight: 220), 1),
+               "a changed target keeps the glass already on screen and releases its black before settling")
+        let reclosed = NotchGlassFade.plan(from: 180, to: 32, endsInGlass: false, current: 0.5)
+        suite.expect(near(reclosed.openness(atHeight: 180), 0) && near(reclosed.openness(atHeight: 32), 0),
+               "an opening reversed late shuts as its page leaves and ends black")
         suite.expect(NotchGlassFade.plan(from: 100, to: 300, endsInGlass: true, current: 1) == .open
                 && NotchGlassFade.plan(from: 300, to: 100, endsInGlass: true, current: 1) == .open
                 && NotchGlassFade.plan(from: .nan, to: 100, endsInGlass: false, current: 1) == .open,
@@ -1327,6 +1487,9 @@ enum NotchTests {
                                        notched: [false], main: 0) == 0, "closed-lid mode falls back to an attached screen")
         suite.expect(NotchSupport.screenIndex(preference: .main, builtIn: [], notched: [], main: 0) == nil,
                "no connected displays means no panel")
+        suite.expect(NotchSupport.screenIndex(preference: .main, builtIn: [true, false, false],
+                                       notched: [true, false, false], main: 2) == 2,
+               "the main display choice follows the display with the menu bar, even beside a notched built-in screen")
         suite.expect(NotchSupport.shouldReplace(.volume, with: .brightness), "continuous controls can replace each other")
         suite.expect(!NotchSupport.shouldReplace(.volume, with: .clipboard), "copy does not interrupt a volume adjustment")
         suite.expect(NotchSupport.shouldReplace(.battery, with: .capture), "a capture takes precedence over passive battery status")
@@ -1335,6 +1498,11 @@ enum NotchTests {
                "hardware volume steps clamp to audible limits")
         suite.expect(NotchSupport.volumeLevel(current: 0.5, direction: 1, fine: true) == 0.515625,
                "fine volume preserves the system quarter-step")
+        suite.expect((0..<9).map { NotchClipboardPastePress.index(
+                    keyCode: [18, 19, 20, 21, 23, 22, 26, 28, 25][$0], commandOnly: true) } == (0..<9).map { $0 }
+               && NotchClipboardPastePress.index(keyCode: 18, commandOnly: false) == nil
+               && NotchClipboardPastePress.index(keyCode: 29, commandOnly: true) == nil,
+               "⌘1 to ⌘9 on the clipboard page name the first nine entries, and nothing else does")
 
         var session = NotchSessionState()
         session.locked = true
@@ -1428,6 +1596,11 @@ enum NotchTests {
         suite.expect(seekable?.seekPosition(95.5) == 95.5
                && seekable?.seekPosition(-10) == 0 && seekable?.seekPosition(300) == 180,
                "scrubbing retains fractions and stays within the current track")
+        let videoReply = Data(String(decoding: playingReply, as: UTF8.self)
+            .replacingOccurrences(of: "\"pid\":12", with: "\"pid\":12,\"canSkipNext\":false,\"canSkipPrevious\":true").utf8)
+        let video = NotchPlayback.decode(videoReply, now: now)
+        suite.expect(video?.canSkipNext == false && video?.canSkipPrevious == true && playing?.canSkipNext == nil,
+               "the player's own skip commands reach playback, and a missing list stays unknown")
         suite.expect(playing?.seekPosition(30) == nil && seekable?.seekPosition(.nan) == nil
                && seekable?.seekPosition(.infinity) == nil,
                "unsupported playback and non-finite positions cannot produce seek commands")
@@ -1484,8 +1657,15 @@ enum NotchTests {
         suite.expect(!NotchCalendarSupport.isEnabled(in: defaults), "calendar can still be explicitly disabled")
         defaults.set(true, forKey: DefaultsKey.notchCalendarEnabled)
         suite.expect(NotchCalendarSupport.isEnabled(in: defaults), "calendar can be enabled independently")
+        suite.expect(!NotchCalendarSupport.showsCountdown(in: defaults),
+                     "calendar titles stay out of the closed island until explicitly enabled")
+        defaults.set(true, forKey: DefaultsKey.notchCalendarCountdown)
+        suite.expect(NotchCalendarSupport.showsCountdown(in: defaults),
+                     "the compact countdown follows its own opt-in")
         defaults.set("calendar", forKey: DefaultsKey.notchHiddenModules)
         suite.expect(!NotchCalendarSupport.isEnabled(in: defaults), "hiding the calendar releases its resources")
+        suite.expect(!NotchCalendarSupport.showsCountdown(in: defaults),
+                     "a hidden calendar cannot leave event titles in the island")
         defaults.set("", forKey: DefaultsKey.notchHiddenModules)
         defaults.set(false, forKey: AppFeature.notchCalendar.availabilityKey)
         suite.expect(!NotchCalendarSupport.isEnabled(in: defaults), "removing the calendar from the hub stops its reader")
@@ -1493,6 +1673,7 @@ enum NotchTests {
         defaults.set(false, forKey: DefaultsKey.notchEnabled)
         suite.expect(!NotchCalendarSupport.isEnabled(in: defaults), "the master switch also stops calendar reads")
         suite.expect(SettingsBackupSupport.exportKeys().isSuperset(of: [DefaultsKey.notchCalendarEnabled,
+                                                                 DefaultsKey.notchCalendarCountdown,
                                                                  AppFeature.notchCalendar.availabilityKey]),
                "calendar preferences travel in backup")
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -1517,6 +1698,35 @@ enum NotchTests {
                "an all-day-only calendar has no timed appointment")
         suite.expect(NotchCalendarSupport.nextRefresh(entries, now: now) == now.addingTimeInterval(300),
                "the next refresh chooses the nearest future event boundary")
+        let hour = NotchCalendarSupport.countdownLeadTime
+        suite.expect(NotchCalendarSupport.countdownEvent(entries, now: now) == later
+                     && NotchCalendarSupport.countdownEvent([allDay, current], now: now) == nil,
+                     "the countdown chooses the next timed start, ignoring all-day and ongoing events")
+        suite.expect(NotchCalendarSupport.countdownEvent([event("edge", hour, hour + 60)], now: now)?.id == "edge"
+                     && NotchCalendarSupport.countdownEvent([event("outside", hour + 1, hour + 61)], now: now) == nil,
+                     "the countdown appears only in the hour before a start")
+        suite.expect(NotchCalendarSupport.countdownTransition([event("future", hour + 600, hour + 900)], now: now)
+                     == now.addingTimeInterval(600)
+                     && NotchCalendarSupport.countdownTransition([later], now: now) == later.start,
+                     "a refresh is scheduled when the hour window opens and when an event starts")
+        suite.expect(NotchCalendarSupport.countdownText(until: now.addingTimeInterval(hour), now: now) == "60:00"
+                     && NotchCalendarSupport.countdownText(until: now.addingTimeInterval(61), now: now) == "1:01"
+                     && NotchCalendarSupport.countdownText(until: now, now: now) == "0:00",
+                     "the compact clock includes seconds and never shows negative time")
+        let physical = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                                     safeAreaTop: 32, cameraWidth: 180, compactSideRoom: 120)
+        let calendarWings = physical.compactCalendarGeometry
+        let calendarFooter = NotchGeometry(screen: physical.screen, safeAreaTop: 32,
+                                           cameraWidth: 180, compactSideRoom: 30).compactCalendarGeometry
+        suite.expect(calendarWings.compactActivityWingWidth == 120 && !calendarWings.compactActivityUsesFooter
+                     && calendarFooter.compactActivityUsesFooter && calendarFooter.compactActivityCameraGap == 0,
+                     "the event title uses the available wings or a full row below a crowded physical notch")
+        suite.expect(physical.compactCalendarGeometry(wing: 90).compactActivityWingWidth == 90
+                     && physical.compactCalendarGeometry(wing: 30).compactActivityWingWidth == 72
+                     && physical.compactCalendarGeometry(wing: 500).compactActivityWingWidth == 120
+                     && NotchGeometry(screen: physical.screen, safeAreaTop: 32, cameraWidth: 180, compactSideRoom: 80)
+                        .compactCalendarGeometry(wing: 100).compactActivityWingWidth == 80,
+                     "the countdown wings fit the wider of the title and the clock, within the menus' room")
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/New_York")!
         let midnight = calendar.date(from: DateComponents(year: 2026, month: 3, day: 8))!
@@ -1572,6 +1782,14 @@ enum NotchTests {
         let distant = NotchCalendarSupport.readInterval(month: date(2030, 12, 1), now: now, calendar: calendar)
         suite.expect(distant.duration <= 43 * 86400 && distant.start > now,
                "browsing a distant month reads only its grid, never every intervening event")
+        let current = NotchCalendarSupport.readInterval(month: nil, now: now, calendar: calendar)
+        suite.expect(!NotchCalendarSupport.needsCurrentRead(visible: interval, current: current,
+                                                           countdownEnabled: true)
+                     && NotchCalendarSupport.needsCurrentRead(visible: distant, current: current,
+                                                              countdownEnabled: true)
+                     && !NotchCalendarSupport.needsCurrentRead(visible: distant, current: current,
+                                                               countdownEnabled: false),
+                     "the countdown keeps today's events while browsing another month without extra reads when off")
         let resting = NotchCalendarSupport.readInterval(month: nil, now: now, calendar: calendar)
         suite.expect(resting.start == date(2026, 3, 31) && resting.end == date(2026, 4, 7),
                "closing the month returns the reader to today's seven-day interval")

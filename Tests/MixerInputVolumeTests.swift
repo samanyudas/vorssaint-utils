@@ -30,13 +30,15 @@ enum MixerInputVolumeContract {
         }
     }
     enum AppFeature {
-        case mixer, micMute
+        case mixer, audioPriority, micMute
         var isAvailable: Bool { true }
     }
     enum DefaultsKey {
         static let preferredInputDevice = "preferred"
+        static let audioPriorityInputEnabled = "audioPriorityInputEnabled"
         static let micMuteActive = "mute"
         static let micMuteSavedVolumes = "savedVolumes"
+        static let micMuteSavedChannelVolumes = "savedChannelVolumes"
         static let micMuteMutedDevices = "owned"
         static let micMuteSavedVolume = "legacyVolume"
         static let micMuteShortcutEnabled = "shortcutEnabled"
@@ -485,6 +487,40 @@ enum MixerInputVolumeContract {
         m.stop()
         check(HAL.current == 10, "stop restores original input selection")
 
+        // Audio device priority: a microphone it puts in use becomes the
+        // system's own choice, so quitting leaves it there. Only a change made
+        // by the saved preferred microphone is undone.
+        func priorityManager() -> AudioInputDeviceManager {
+            HAL.reset()
+            HAL.devices = [10, 20, 30]
+            HAL.levels[HAL.key(10)] = 0.5
+            HAL.levels[HAL.key(20)] = 0.5
+            HAL.levels[HAL.key(30)] = 0.5
+            let m = manager()
+            m.setInputPriorityActive(true)
+            DispatchQueue.drain()
+            m.setCurrentInputDeviceUID("device-20")
+            DispatchQueue.drain()
+            return m
+        }
+        m = priorityManager()
+        check(HAL.current == 20, "a priority pick becomes the system input")
+        m.stop()
+        check(HAL.current == 20, "quitting keeps the microphone the priority list picked")
+        m = priorityManager()
+        m.setInputPriorityActive(false)
+        DispatchQueue.drain()
+        m.stop()
+        check(HAL.current == 20, "turning priority off does not make quitting undo its pick")
+        m = priorityManager()
+        m.setInputPriorityActive(false)
+        DispatchQueue.drain()
+        m.setPreferredInputDeviceUID("device-30")
+        DispatchQueue.drain()
+        check(HAL.current == 30, "the saved preferred microphone takes over once priority is off")
+        m.stop()
+        check(HAL.current == 20, "quitting then goes back to the microphone the priority list picked")
+
         HAL.reset()
         HAL.levels[HAL.key(10)] = 0.6
         m = manager()
@@ -707,5 +743,49 @@ enum MixerInputVolumeContract {
         check(
             QuickToolHUD.messages == ["muted"] && MicMuteService.isSilenced(10),
             "an idle microphone with no mute or level of its own does not make the mute partial")
+        HAL.reset()
+        HAL.levels[HAL.key(10)] = 0.5
+        HAL.levels[HAL.key(10, 1)] = 1
+        HAL.levels[HAL.key(10, 2)] = 0.6
+        MicMuteService.shared.setMuted(true)
+        DispatchQueue.drain()
+        check(
+            MicMuteService.shared.isMuted && HAL.levels[HAL.key(10)] == 0
+                && HAL.levels[HAL.key(10, 1)] == 0 && HAL.levels[HAL.key(10, 2)] == 0,
+            "a gain mute lowers the main level and every channel")
+        MicMuteService.shared.setMuted(false)
+        DispatchQueue.drain()
+        check(
+            HAL.levels[HAL.key(10)] == 0.5 && HAL.levels[HAL.key(10, 1)] == 1
+                && HAL.levels[HAL.key(10, 2)] == 0.6,
+            "a gain unmute puts back the main level and the balance between channels")
+        HAL.reset()
+        HAL.levels[HAL.key(10, 1)] = 0.8
+        HAL.levels[HAL.key(10, 2)] = 0.4
+        MicMuteService.shared.setMuted(true)
+        DispatchQueue.drain()
+        MicMuteService.shared.setMuted(false)
+        DispatchQueue.drain()
+        check(
+            HAL.levels[HAL.key(10, 1)] == 0.8 && HAL.levels[HAL.key(10, 2)] == 0.4,
+            "a device with channel levels only keeps their balance through a gain mute")
+        // What a version without saved channel levels leaves behind: the main
+        // level and both channels at zero, with only the main level saved.
+        HAL.reset()
+        HAL.levels[HAL.key(10)] = 0
+        HAL.levels[HAL.key(10, 1)] = 0
+        HAL.levels[HAL.key(10, 2)] = 0
+        UserDefaults.standard.set(true, forKey: DefaultsKey.micMuteActive)
+        UserDefaults.standard.set(["device-10": 0.5], forKey: DefaultsKey.micMuteSavedVolumes)
+        UserDefaults.standard.set(["device-10"], forKey: DefaultsKey.micMuteMutedDevices)
+        MicMuteService.shared = MicMuteService()
+        MicMuteService.shared.syncWithPreferences()
+        DispatchQueue.drain()
+        MicMuteService.shared.setMuted(false)
+        DispatchQueue.drain()
+        check(
+            !MicMuteService.shared.isMuted && HAL.levels[HAL.key(10)] == 0.5
+                && HAL.levels[HAL.key(10, 1)] == 0.5 && HAL.levels[HAL.key(10, 2)] == 0.5,
+            "an unmute after updating brings back the channels an earlier version lowered")
     }
 }

@@ -10,7 +10,7 @@ struct NotchView: View {
     @ObservedObject private var music = NotchMusicService.shared
     @ObservedObject private var launcher = QuickLauncherService.shared
     @ObservedObject private var updates = UpdateService.shared
-    @AppStorage(DefaultsKey.liquidGlassEnabled) private var glass = false
+    @AppStorage(DefaultsKey.notchLiquidGlassEnabled) private var glass = false
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -90,7 +90,7 @@ struct NotchView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.top, service.geometry.safeContentTop)
-        } else if let notice = service.notice {
+        } else if let notice = service.notice ?? (service.peeking ? nil : service.departingNotice) {
             if service.noticeExpanded, let content = notice.notification {
                 NotchNotificationPreviewView(notice: notice, content: content, service: service)
                     .padding(.horizontal, NotchLayout.horizontalInset)
@@ -124,8 +124,13 @@ struct NotchView: View {
             case .timer: NotchTimerStrip(service: service)
             case .downloads: NotchDownloadStrip(service: service)
             case .agents: NotchAgentStrip(service: service)
+            case .calendar: NotchCalendarStrip(service: service)
             case .music: NotchMusicStrip(service: service)
             }
+        } else if let departingMusic = service.departingMusic {
+            NotchMusicStrip(service: service, snapshot: departingMusic)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         } else {
             compact
                 .transition(.opacity)

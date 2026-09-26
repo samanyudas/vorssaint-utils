@@ -257,6 +257,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/NotchStrings.swift
         Sources/Vorssaint/Core/NotchTourStrings.swift
         Sources/Vorssaint/Core/NotchEditorStrings.swift
+        Sources/Vorssaint/UI/Settings/NotchSettingsTabRow.swift
         Sources/Vorssaint/Core/NotchActivityStrings.swift
         Sources/Vorssaint/Services/Notch/NotchTimerSupport.swift
         Sources/Vorssaint/Services/Notch/NotchTimerAlert.swift
@@ -312,6 +313,8 @@ if (( TEST )); then
         Sources/Vorssaint/Core/RecorderStrings.swift
         Sources/Vorssaint/Core/RecorderShareStrings.swift
         Sources/Vorssaint/Core/CameraPreviewStrings.swift
+        Sources/Vorssaint/Core/WallpaperStrings.swift
+        Sources/Vorssaint/Services/Wallpaper/WallpaperSupport.swift
         Sources/Vorssaint/Core/ScratchpadStrings.swift
         Sources/Vorssaint/Core/FinderRenameStrings.swift
         Sources/Vorssaint/Core/CommandBarStrings.swift
@@ -327,6 +330,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/BluetoothSleepStrings.swift
         Sources/Vorssaint/Core/PermissionGuideStrings.swift
         Sources/Vorssaint/Core/FanControlStrings.swift
+        Sources/Vorssaint/Core/ConnectedDevicesStrings.swift
         Sources/Vorssaint/Services/FanControl/FanControlSupport.swift
         Sources/Vorssaint/Services/FanControl/FanControlResumeSupport.swift
         Sources/Vorssaint/Services/Snippets/TextSnippetSupport.swift
@@ -389,6 +393,7 @@ if (( TEST )); then
         Sources/Vorssaint/Core/AppUpdateStrings.swift
         Sources/Vorssaint/Core/DiskImageInstallerStrings.swift
         Sources/Vorssaint/Services/DiskImageInstaller/DiskImageInstallerSupport.swift
+        Sources/Vorssaint/UI/NonModalAlert.swift
         Sources/Vorssaint/Services/Clipboard/ClipboardHistorySupport.swift
         Sources/Vorssaint/Services/Clipboard/ClipboardAutoClearSupport.swift
         Sources/Vorssaint/Services/AutoQuit/AutoQuitSupport.swift
@@ -401,6 +406,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/InstalledApps.swift
         Sources/Vorssaint/Services/LaunchAtLoginSupport.swift
         Sources/Vorssaint/UI/Settings/SettingsSearchSupport.swift
+        Sources/Vorssaint/UI/Settings/SettingsSidebarSupport.swift
         Sources/Vorssaint/UI/Settings/FeatureVisibilitySupport.swift
         Sources/Vorssaint/UI/Settings/SettingsWindow.swift
         Sources/Vorssaint/Core/SettingsNavigationStrings.swift
@@ -424,6 +430,8 @@ if (( TEST )); then
         Sources/Vorssaint/Core/MouseClickDebounceStrings.swift
         Sources/Vorssaint/Core/MouseExceptionStrings.swift
         Sources/Vorssaint/Core/ClipboardIgnoredAppsStrings.swift
+        Sources/Vorssaint/Core/WindowLayoutIgnoredAppsStrings.swift
+        Sources/Vorssaint/Services/WindowLayout/WindowLayoutIgnoredApps.swift
         Sources/Vorssaint/Core/WindowPreviewExclusionStrings.swift
         Sources/Vorssaint/Core/WindowMaximizerExclusionStrings.swift
         Sources/Vorssaint/Core/DiskExclusionStrings.swift
@@ -445,6 +453,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/QuickTools/QuickTogglesSupport.swift
         Sources/Vorssaint/Services/QuickTools/ScreenshotCapturePolicy.swift
         Sources/Vorssaint/Services/QuickTools/ScreenshotSupport.swift
+        Sources/Vorssaint/UI/Settings/ScreenCaptureToolPicker.swift
         Sources/Vorssaint/Services/QuickTools/ScreenshotRenderer.swift
         Sources/Vorssaint/Services/QuickTools/RecentCaptureStore.swift
         Sources/Vorssaint/Services/QuickTools/ScreenshotSharingSupport.swift
@@ -457,6 +466,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/SessionActivity.swift
         Sources/Vorssaint/Services/SessionActivitySupport.swift
         Sources/Vorssaint/Services/ScrollWheelSupport.swift
+        Sources/Vorssaint/Services/HorizontalWheelScrolling.swift
         Sources/Vorssaint/Services/SmoothScrollSupport.swift
         Sources/Vorssaint/Services/MouseAcceleration/MouseAccelerationSupport.swift
         Sources/Vorssaint/Services/FocusFollowsMouse/FocusFollowsMouseSupport.swift
@@ -482,16 +492,19 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Metrics/PeripheralBatterySupport.swift
         Sources/Vorssaint/Services/Metrics/DiskSupport.swift
         Sources/Vorssaint/Services/Metrics/MonitorSamplingPolicy.swift
+        Sources/Vorssaint/Services/Metrics/USBDeviceSampler.swift
         Sources/Vorssaint/Services/Metrics/MaxCapacityProbe.swift
         Sources/Vorssaint/Services/Metrics/TemperatureSensorSelector.swift
         Sources/Vorssaint/Services/Metrics/SustainedAlertGate.swift
         Sources/Vorssaint/Services/WindowLayout/WindowLayoutSupport.swift
         Sources/Vorssaint/Services/WindowLayout/WindowGestureSupport.swift
         Sources/Vorssaint/Core/WindowDirectionalStrings.swift
+        Sources/Vorssaint/Core/PointerDisplayStrings.swift
         Sources/Vorssaint/Services/CleaningMode/CleaningUnlockCounter.swift
         Sources/Vorssaint/Services/CleaningMode/CleaningMouseReleaseGate.swift
         Sources/Vorssaint/Services/Display/ExtraBrightnessSupport.swift
         Sources/Vorssaint/Services/Display/BrightnessSupport.swift
+        Sources/Vorssaint/Services/Display/LidDimmingSupport.swift
         Sources/Vorssaint/Services/Cleaner/CleanerSupport.swift
         Sources/Vorssaint/Services/Cleaner/CleanerPolicy.swift
         Sources/Vorssaint/Services/Cleaner/CleanerSchedule.swift

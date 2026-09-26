@@ -15,6 +15,8 @@ enum NotchNativePlayback {
         let path: NSObject
         var itemIdentifier: String?
         var allowsDirectCommands = false
+        var requiresCurrentPlayer = false
+        var playPauseCommand: Int32 = 2
         var applicationBundleIdentifier: String?
 
         var isRunning: Bool {
@@ -81,6 +83,14 @@ enum NotchNativePlayback {
         lock.lock()
         defer { lock.unlock() }
         return selected
+    }
+
+    private static func playPauseCommand(for info: [String: Any]) -> Int32 {
+        guard let rate = (info["kMRMediaRemoteNowPlayingInfoPlaybackRate"] as? NSNumber)?.doubleValue,
+              rate.isFinite else { return 2 }
+        if rate > 0, info["canPause"] as? Bool == true { return 1 }
+        if rate == 0, info["canPlay"] as? Bool == true { return 0 }
+        return 2
     }
 
     static func select() -> Target? {
@@ -209,10 +219,12 @@ enum NotchNativePlayback {
             guard chosen.path.responds(to: selector) else { return false }
             return unsafeBitCast(chosen.path.method(for: selector), to: IsSystemPlayer.self)(chosen.path, selector)
         }
-        // A third-party client can stop being the global player while a command
-        // is in flight. Its declared per-process automation avoids that race.
-        chosen.allowsDirectCommands = systemPlayer
-            && stringConstant("kMRMediaRemoteOptionNowPlayingContentItemID") != nil
+        // A third-party player without Automation can receive native commands
+        // while it owns the system session. Recheck that ownership at delivery.
+        chosen.requiresCurrentPlayer = !systemPlayer && chosen.pid == currentPID
+        chosen.allowsDirectCommands = (systemPlayer
+            && stringConstant("kMRMediaRemoteOptionNowPlayingContentItemID") != nil)
+            || chosen.requiresCurrentPlayer
         return chosen
     }
 
@@ -231,9 +243,25 @@ enum NotchNativePlayback {
             context = NotchPlaybackContext(pid: target.pid, revision: UUID())
         }
         target.itemIdentifier = next.item
+        // Some players expose Play and Pause separately. Use the command for
+        // the displayed state, keeping Toggle for players without either one.
+        target.playPauseCommand = playPauseCommand(for: info)
         selected = target
         identity = next
         return context
+    }
+
+    /// A supported-command callback may finish after the metadata snapshot.
+    /// Update only the same selected path and recording, without polling again.
+    static func updatePlayPauseCommand(for target: Target, info: [String: Any]) {
+        guard let next = Identity(info) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard var current = selected, current.path === target.path,
+              current.pid == target.pid, current.bundleIdentifier == target.bundleIdentifier,
+              identity == next else { return }
+        current.playPauseCommand = playPauseCommand(for: info)
+        selected = current
     }
 
     static func validatedTarget(for requested: NotchPlaybackContext) -> Target? {
@@ -260,8 +288,9 @@ enum NotchNativePlayback {
         resultLock.unlock()
         lock.lock()
         defer { lock.unlock() }
-        guard matches, context == requested, identity == expected, target.isRunning else { return nil }
-        return target
+        guard matches, context == requested, identity == expected,
+              let current = selected, current.path === target.path, current.isRunning else { return nil }
+        return current
     }
 
     static func readInfo(_ target: Target, artwork: Bool, queue: DispatchQueue,
@@ -292,22 +321,46 @@ enum NotchNativePlayback {
         read(target.path, queue, completion)
     }
 
+    private static func currentPlayerPID() -> Int32? {
+        typealias Read = @convention(c) (DispatchQueue, @escaping @convention(block) (AnyObject?) -> Void) -> Void
+        typealias PID = @convention(c) (AnyObject) -> Int32
+        guard let read = function(handle, "MRMediaRemoteGetNowPlayingClient", as: Read.self),
+              let getPID = function(handle, "MRNowPlayingClientGetProcessIdentifier", as: PID.self) else { return nil }
+        let group = DispatchGroup()
+        let resultLock = NSLock()
+        var pid: Int32?
+        group.enter()
+        read(callbacks) { client in
+            resultLock.lock()
+            pid = client.map(getPID)
+            resultLock.unlock()
+            group.leave()
+        }
+        guard group.wait(timeout: .now() + 0.5) == .success else { return nil }
+        return resultLock.withLock { pid }
+    }
+
     @discardableResult
     static func send(_ command: Int32, options: CFDictionary? = nil, to target: Target) -> Bool {
         typealias Send = @convention(c) (Int32, CFDictionary?, AnyObject, UInt32, DispatchQueue,
             @escaping @convention(block) (UInt32, NSArray?) -> Void) -> Bool
-        guard target.isRunning, target.allowsDirectCommands, let item = target.itemIdentifier,
-              let itemKey = stringConstant("kMRMediaRemoteOptionNowPlayingContentItemID"),
+        guard target.isRunning, target.allowsDirectCommands,
+              !target.requiresCurrentPlayer || currentPlayerPID() == target.pid,
               let send = function(handle, "MRMediaRemoteSendCommandToPlayer", as: Send.self) else { return false }
         // The service may redirect unprivileged requests to the global player.
-        // The receiver must reject a different item instead of acting on it.
+        // Scope to the recording when possible; an unidentified recording is
+        // allowed only while this process remains the current system player.
         var scoped = (options as? [String: Any]) ?? [:]
-        scoped[itemKey] = item
+        if let item = target.itemIdentifier,
+           let itemKey = stringConstant("kMRMediaRemoteOptionNowPlayingContentItemID") {
+            scoped[itemKey] = item
+        } else if !target.requiresCurrentPlayer { return false }
+        let settings = scoped.isEmpty ? nil : scoped as CFDictionary
         let group = DispatchGroup()
         let resultLock = NSLock()
         var delivered = false
         group.enter()
-        guard send(command, scoped as CFDictionary, target.path, 0, callbacks, { error, responses in
+        guard send(command, settings, target.path, 0, callbacks, { error, responses in
             resultLock.lock()
             delivered = error == 0 && (responses as? [NSNumber])?.contains(where: { $0.intValue == 0 }) == true
             resultLock.unlock()

@@ -33,6 +33,12 @@ enum NotchMusicAutomationFlowContract {
         static var permission = Access.granted
         static var deliveries: [(NotchPlaybackCommand, Int32)] = []
         static func access(to target: Target) -> Access { permission }
+        static var capabilities: NotchMusicAutomationCapabilities?
+        static var inspections = 0
+        static func inspect(_ target: Target) -> Availability? {
+            inspections += 1
+            return capabilities.map { Availability(target: target, capabilities: $0, access: permission) }
+        }
         struct Event {
             enum Option { case waitForReply, neverInteract, dontRecord }
             let command: NotchPlaybackCommand
@@ -53,6 +59,15 @@ enum NotchMusicAutomationFlowContract {
         NotchMusicAutomation.alive = true
         NotchMusicAutomation.permission = .granted
         NotchMusicAutomation.deliveries = []
+        NotchMusicAutomation.capabilities = nil
+        NotchMusicAutomation.inspections = 0
+    }
+}
+
+extension NotchMusicAutomationFlowContract.NotchMusicAutomation.Target {
+    init?(_ playback: NotchPlayback) {
+        guard let pid = playback.track.appPID else { return nil }
+        self.init(pid: pid)
     }
 }
 
@@ -79,6 +94,7 @@ enum NotchMusicAutomationTests {
         parsing(suite)
         descriptors(suite)
         lifecycle(suite)
+        refresh(suite)
     }
 
     private static func parsing(_ suite: TestSuite) {
@@ -156,6 +172,13 @@ enum NotchMusicAutomationTests {
             sampledAt: Date(), canSeek: true, commandContext: current.commandContext, canSendCommandsDirectly: true)
         service.playback = native
         suite.expect(service.canSeek && service.canPerform(.seek(20)), "direct native playback keeps its existing seeking capability")
+        suite.expect(service.canPerform(.next) && !service.lacksTrackSkipping(.next),
+               "a player whose commands are unknown keeps its skip buttons")
+        var video = native; video.canSkipNext = false; video.canSkipPrevious = false
+        service.playback = video
+        suite.expect(service.lacksTrackSkipping(.next) && service.lacksTrackSkipping(.previous)
+               && !service.canPerform(.next) && service.canPerform(.toggle),
+               "a player without next or previous commands keeps only play and pause")
         service.playback = current
         let target = Automation.Target(pid: 42)
         service.automationTarget = target
@@ -209,5 +232,42 @@ enum NotchMusicAutomationTests {
         Context.DispatchQueue.worker.drain(); Context.DispatchQueue.main.drain()
         suite.expect(Context.AppleScriptRunner.prompts.isEmpty && !service.requestingAutomation,
                "stopping before a queued consent request suppresses the prompt and releases pending state")
+    }
+
+    /// Each page that shows the controls checks the player again when it
+    /// appears. Until that check lands, the controls keep the player's last
+    /// answer instead of flashing the fallback row on every open.
+    private static func refresh(_ suite: TestSuite) {
+        typealias Context = NotchMusicAutomationFlowContract
+        typealias Automation = Context.NotchMusicAutomation
+        Context.reset()
+        defer { Context.reset() }
+        Automation.capabilities = NotchMusicAutomationCapabilities.parse(Data(dictionary.utf8))
+        let service = Context.RefreshService()
+        func land() { service.queue.drain(); Context.DispatchQueue.main.drain() }
+        service.playback = playback()
+        service.refreshAutomation()
+        suite.expect(service.automationAvailability == nil,
+               "a player seen for the first time shows no access until its check lands")
+        land()
+        suite.expect(service.automationAvailability?.access == .granted && Automation.inspections == 1,
+               "the first check fills in the player's access")
+        Automation.permission = .denied
+        service.refreshAutomation()
+        suite.expect(service.automationAvailability?.access == .granted,
+               "opening the page again keeps the last answer on screen while the player is checked again")
+        land()
+        suite.expect(service.automationAvailability?.access == .denied && Automation.inspections == 2,
+               "the fresh check still replaces the kept answer, so a revoked permission shows")
+        let track = RadialNowPlayingSnapshot(title: "Other", artist: "Artist", album: "Album", artworkData: nil,
+                                            appBundleIdentifier: "local.test.player", appPID: 43)
+        let other = NotchPlayback(track: track, isPlaying: true, elapsed: 3, duration: 180, rate: 1, sampledAt: Date(),
+                                  canSeek: false, itemIdentifier: "two", commandContext: .init(pid: 43, revision: UUID()))
+        service.playback = other
+        service.updateAutomation(for: other)
+        suite.expect(service.automationAvailability == nil && service.automationTarget?.pid == 43,
+               "another player never shows the previous player's access")
+        land()
+        suite.expect(service.automationAvailability?.target.pid == 43, "the new player gets its own answer")
     }
 }

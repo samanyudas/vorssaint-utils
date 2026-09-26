@@ -29,8 +29,6 @@ final class ScreenshotService: ObservableObject {
     private var session: ScreenshotSelectionController?
     private var preview: ScreenshotQuickPreviewController?
     private var editors: [ScreenshotEditorController] = []
-    private var latestCaptureEditors: Set<ObjectIdentifier> = []
-    private var hasLatestCaptureEditor: Bool { !latestCaptureEditors.isEmpty }
     private var countdown: DispatchWorkItem?
     private var countdownRemaining = 0
     private var countdownMode: CaptureMode = .standard
@@ -189,7 +187,6 @@ final class ScreenshotService: ObservableObject {
             editor.close()
         }
         editors.removeAll()
-        latestCaptureEditors.removeAll()
         ScreenshotPinController.shared.closeAll()
     }
 
@@ -318,7 +315,7 @@ final class ScreenshotService: ObservableObject {
         preview?.close()
         preview = nil
         let pointer = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(pointer) })
+        guard let screen = NSScreen.screens.first(where: { NSMouseInRect(pointer, $0.frame, false) })
                 ?? NSScreen.main,
               screen.displayID != 0 else {
             QuickToolHUD.show(icon: "camera.viewfinder", message: strings.captureFailed)
@@ -419,7 +416,6 @@ final class ScreenshotService: ObservableObject {
     private func route(_ capture: ScreenshotSelectionController.Capture) {
         latestCaptureID = UUID()
         linkCopyRetry.clear()
-        latestCaptureEditors.removeAll()
         preview?.close()
         RecentCaptureService.shared.recordScreenshot(capture)
         if ScreenshotSharingSupport.retainsLatestCapture() {
@@ -429,23 +425,21 @@ final class ScreenshotService: ObservableObject {
             autoCopy(capture)
         }
         if ScreenshotDefaultAction.current == .edit {
-            openEditor(with: capture, ownsLatestCapture: true)
+            openEditor(with: capture)
             return
         }
-        presentPreview(capture, defaultAction: ScreenshotDefaultAction.current,
-                       ownsLatestCapture: true)
+        presentPreview(capture, defaultAction: ScreenshotDefaultAction.current)
     }
 
     /// A history item returns to the same floating preview without repeating
     /// automatic copy or save actions that already ran when it was captured.
     func restorePreview(_ capture: ScreenshotSelectionController.Capture) {
         preview?.close()
-        presentPreview(capture, defaultAction: .none, ownsLatestCapture: false)
+        presentPreview(capture, defaultAction: .none)
     }
 
     private func presentPreview(_ capture: ScreenshotSelectionController.Capture,
-                                defaultAction: ScreenshotDefaultAction,
-                                ownsLatestCapture: Bool) {
+                                defaultAction: ScreenshotDefaultAction) {
         var saved: SaveOutcome?
         let controller = ScreenshotQuickPreviewController(
             capture: capture,
@@ -455,7 +449,7 @@ final class ScreenshotService: ObservableObject {
                 guard let self else { return [] }
                 switch action {
                 case .edit:
-                    self.openEditor(with: capture, ownsLatestCapture: ownsLatestCapture)
+                    self.openEditor(with: capture)
                     return [.edit]
                 case .pin:
                     ScreenshotPinController.shared.pin(image: capture.image, scale: capture.scale)
@@ -493,17 +487,20 @@ final class ScreenshotService: ObservableObject {
                 }
                 self.shareDirect(capture, duration: duration, completion: completion)
             },
+            shareFile: { [weak self] in
+                guard let self, let export = self.flatten(capture) else { return nil }
+                return Self.temporaryExportFile(image: export.image, scale: export.scale,
+                                                strings: self.strings)
+            },
             onClose: { [weak self] in self?.preview = nil })
         preview = controller
         controller.show()
     }
 
-    func openEditor(with capture: ScreenshotSelectionController.Capture,
-                    ownsLatestCapture: Bool = false) {
+    func openEditor(with capture: ScreenshotSelectionController.Capture) {
         WindowActivationPolicy.retain()
         let editor = ScreenshotEditorController(capture: capture)
         editors.append(editor)
-        if ownsLatestCapture { latestCaptureEditors.insert(ObjectIdentifier(editor)) }
         editor.show()
     }
 
@@ -515,7 +512,10 @@ final class ScreenshotService: ObservableObject {
             preview.shareLink()
             return
         }
-        guard !hasLatestCaptureEditor else { return }
+        guard editors.isEmpty else {
+            NSSound.beep()
+            return
+        }
         guard !uploadingLatestCapture else { return }
         if let record = linkCopyRetry.record(for: latestCaptureID,
                                              availableRecords: ScreenshotShareService.shared.records) {
@@ -566,7 +566,7 @@ final class ScreenshotService: ObservableObject {
         }
         preview?.close()
         preview = nil
-        openEditor(with: capture, ownsLatestCapture: true)
+        openEditor(with: capture)
     }
 
     private func openClipboardImage() {
@@ -626,7 +626,6 @@ final class ScreenshotService: ObservableObject {
 
     func editorDidClose(_ editor: ScreenshotEditorController) {
         guard editors.contains(where: { $0 === editor }) else { return }
-        latestCaptureEditors.remove(ObjectIdentifier(editor))
         editors.removeAll { $0 === editor }
         WindowActivationPolicy.release()
     }
@@ -731,6 +730,7 @@ final class ScreenshotService: ObservableObject {
         let (url, consumedNumber) = Self.saveDestination(strings: strings)
         do {
             try data.write(to: url, options: .atomic)
+            ScreenshotSupport.markAsScreenCapture(url)
             QuickToolHUD.show(icon: "camera.viewfinder",
                               message: String(format: strings.savedHUDFormat,
                                               url.deletingLastPathComponent().lastPathComponent))
@@ -755,6 +755,7 @@ final class ScreenshotService: ObservableObject {
         let (url, consumedNumber) = Self.saveDestination(strings: strings)
         do {
             try data.write(to: url, options: .atomic)
+            ScreenshotSupport.markAsScreenCapture(url)
         } catch {
             if let consumedNumber {
                 Self.rewindNumberSequence(toReuse: consumedNumber)
@@ -802,6 +803,22 @@ final class ScreenshotService: ObservableObject {
     static func dragItemProvider(image: CGImage,
                                  scale: CGFloat,
                                  strings: ScreenshotFeatureStrings) -> NSItemProvider? {
+        guard let url = temporaryExportFile(image: image, scale: scale, strings: strings) else {
+            return nil
+        }
+        guard let provider = NSItemProvider(contentsOf: url) else {
+            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
+            return nil
+        }
+        return provider
+    }
+
+    /// A dated PNG in its own temporary folder, for a drag or the system
+    /// share sheet. The receiving side reads the file after the gesture ends,
+    /// so the folder stays for an hour before it is removed.
+    static func temporaryExportFile(image: CGImage,
+                                    scale: CGFloat,
+                                    strings: ScreenshotFeatureStrings) -> URL? {
         guard let data = ScreenshotRenderer.pngData(from: image, scale: scale) else {
             return nil
         }
@@ -809,15 +826,11 @@ final class ScreenshotService: ObservableObject {
         guard let url = try? ScreenshotSupport.temporaryDragFile(data: data, name: name) else {
             return nil
         }
-        guard let provider = NSItemProvider(contentsOf: url) else {
-            try? FileManager.default.removeItem(at: url.deletingLastPathComponent())
-            return nil
-        }
         let folder = url.deletingLastPathComponent()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 60 * 60) {
             try? FileManager.default.removeItem(at: folder)
         }
-        return provider
+        return url
     }
 
     // MARK: - Save location

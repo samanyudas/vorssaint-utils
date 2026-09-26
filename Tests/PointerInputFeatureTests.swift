@@ -147,6 +147,20 @@ enum PointerInputFeatureTests {
         suite.expect(KeyboardDebounceConfig.decodeKeyWindows("37:100,bad,40:0,99:999")
                == [37: 100, 40: 0, 99: Defaults.defaultKeyboardDebounceWindowMs],
                "debounce key windows decode and sanitize stored values")
+        let preciseConfig = KeyboardDebounceConfig(enabled: true,
+                                                   globalWindowMs: 1,
+                                                   keyWindows: [:])
+        debounceState.reset()
+        suite.expect(!debounceDown(0, at: 90.0000, config: preciseConfig),
+               "a 1 ms keyboard window accepts the first press")
+        _ = debounceUp(0, at: 90.0005, config: preciseConfig)
+        suite.expect(debounceDown(0, at: 90.0010, config: preciseConfig),
+               "a 1 ms keyboard window still filters a same-key bounce")
+        suite.expect(!debounceDown(11, at: 90.0012, config: preciseConfig),
+               "different keys pressed within 5 ms are never filtered")
+        _ = debounceUp(11, at: 90.0014, config: preciseConfig)
+        suite.expect(!debounceDown(0, at: 90.0015, config: preciseConfig),
+               "the first key is accepted again after another key")
 
         // MARK: Mouse click debounce
 
@@ -209,11 +223,22 @@ enum PointerInputFeatureTests {
                 && !click(0, .up, at: 301, config: disabledClickConfig)
                 && !click(0, .down, at: 302, config: disabledClickConfig),
                "disabled click debounce is a complete pass-through")
+        let preciseClickConfig = MouseClickDebounceConfig(enabled: true, windowMilliseconds: 6)
+        clickState.reset()
+        suite.expect(!click(0, .down, at: 400, config: preciseClickConfig)
+                && !click(0, .up, at: 401, config: preciseClickConfig)
+                && !click(0, .down, at: 407, config: preciseClickConfig)
+                && !click(0, .up, at: 408, config: preciseClickConfig)
+                && click(0, .down, at: 413, config: preciseClickConfig),
+               "a 6 ms window keeps a click 6 ms after release and filters one 5 ms after")
         suite.expect(Defaults.sanitizedMouseClickDebounceWindow(5) == 5
+                && Defaults.sanitizedMouseClickDebounceWindow(6) == 6
                 && Defaults.sanitizedMouseClickDebounceWindow(100) == 100
+                && Defaults.sanitizedMouseClickDebounceWindow(4)
+                    == Defaults.defaultMouseClickDebounceWindowMs
                 && Defaults.sanitizedMouseClickDebounceWindow(0)
                     == Defaults.defaultMouseClickDebounceWindowMs,
-               "mouse click debounce keeps only its conservative settings range")
+               "mouse click debounce accepts any millisecond window from 5 to 100 ms")
         let clickDebounceServiceSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/MouseClickDebounce/MouseClickDebounceService.swift",
             encoding: .utf8)) ?? ""
@@ -1207,6 +1232,28 @@ enum PointerInputFeatureTests {
                                                  positionUnavailable: false, systemDragGestureEnabled: true,
                                                  tapFingers: 3),
                "three-finger tap stands down while the system drag gesture owns it")
+        suite.expect(MiddleClickSupport.radialMenuTapFingers(radialMenuWantsTap: true, middleClickTapFingers: 0) == 4
+                && MiddleClickSupport.radialMenuTapFingers(radialMenuWantsTap: true, middleClickTapFingers: 3) == 4
+                && MiddleClickSupport.radialMenuTapFingers(radialMenuWantsTap: false, middleClickTapFingers: 0) == 0,
+               "a radial menu wheel that asks for the tap gets four fingers, beside a three-finger middle click")
+        suite.expect(MiddleClickSupport.radialMenuTapFingers(radialMenuWantsTap: true, middleClickTapFingers: 4) == 0,
+               "a middle click already on four fingers keeps them")
+        let tapWheel = RadialMenuProfile(name: "Tap", trackpadTap: true)
+        let legacyWheel = Data(#"[{"name":"Old","shortcut":"","mouseButton":"off","items":[]}]"#.utf8)
+        suite.expect(RadialMenuSupport.decodeProfiles(RadialMenuSupport.encodeProfiles([tapWheel])).first?.trackpadTap == true
+                && RadialMenuSupport.decodeProfiles(legacyWheel).first?.trackpadTap == false,
+               "the trackpad tap is saved with its wheel and off for wheels saved before it")
+        suite.expect(RadialMenuSupport.needsAccessibility([tapWheel]),
+               "a wheel opened by the trackpad tap needs the event tap's Accessibility permission")
+        let shortcutTapWheel = RadialMenuProfile(
+            name: "Tap", shortcut: "cmd+shift+space",
+            items: [RadialMenuItem(kind: .app, payload: "/System/Library/CoreServices/Finder.app")],
+            trackpadTap: true)
+        let copiedWheel = shortcutTapWheel.duplicate(named: "Tap 2")
+        suite.expect(copiedWheel.id != shortcutTapWheel.id && copiedWheel.name == "Tap 2"
+                && copiedWheel.items == shortcutTapWheel.items
+                && copiedWheel.shortcut.isEmpty && !copiedWheel.trackpadTap,
+               "a duplicated wheel keeps the actions but leaves the shortcut and the trackpad tap to the original")
         suite.expect(MiddleClickSupport.tapShouldFire(duration: 0.15, maxMovement: 0.01, maxSpreadChange: 0.01,
                                                 exceededFingerCount: false, buttonPressedDuring: false,
                                                 positionUnavailable: false, systemDragGestureEnabled: true,

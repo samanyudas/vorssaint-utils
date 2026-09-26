@@ -656,6 +656,37 @@ enum ScreenshotSupport {
             && (draft.standardized == bounds.standardized || !draft.contains(point))
     }
 
+    /// A captured image's alpha, top row first.
+    struct AlphaCoverage {
+        let alpha: [UInt8]
+        let width: Int
+        let height: Int
+
+        /// Total alpha inside `rect`, in image pixels from the top left.
+        func sum(in rect: CGRect) -> Int {
+            let area = rect.integral.intersection(CGRect(x: 0, y: 0, width: width, height: height))
+            guard !area.isNull, !area.isEmpty else { return 0 }
+            var total = 0
+            for row in Int(area.minY)..<Int(area.maxY) {
+                let start = row * width
+                for column in Int(area.minX)..<Int(area.maxX) { total += Int(alpha[start + column]) }
+            }
+            return total
+        }
+    }
+
+    /// Where a display capture of only some windows put them. Older systems
+    /// draw each window where it sits on the display. macOS 27 packs the
+    /// included windows into the image's top-left corner, keeping their
+    /// relative layout, so cropping at the window's place on screen kept only
+    /// its lower-right part beside empty space. Everything but those windows
+    /// is transparent, so
+    /// the placement that holds more of them is the one the system used.
+    static func attachedCaptureCrop(placed: CGRect, packed: CGRect,
+                                    coverage: AlphaCoverage) -> CGRect {
+        coverage.sum(in: packed) > coverage.sum(in: placed) ? packed : placed
+    }
+
     static func clamp(_ rect: CGRect, to bounds: CGRect) -> CGRect {
         var result = rect.intersection(bounds)
         if result.isNull { result = .zero }
@@ -764,15 +795,15 @@ enum ScreenshotSupport {
             let area = overlap.isNull ? 0 : max(0, overlap.width) * max(0, overlap.height)
             let winsTie = area == selectedArea
                 && area > 0
-                && screen.frame.contains(pointer)
-                && !(selected?.frame.contains(pointer) ?? false)
+                && NSMouseInRect(pointer, screen.frame, false)
+                && !(selected.map { NSMouseInRect(pointer, $0.frame, false) } ?? false)
             if area > selectedArea || winsTie {
                 selected = screen
                 selectedArea = area
             }
         }
         if let selected { return selected.visibleFrame }
-        return screens.first { $0.frame.contains(pointer) }?.visibleFrame ?? fallback
+        return screens.first { NSMouseInRect(pointer, $0.frame, false) }?.visibleFrame ?? fallback
     }
 
     /// Places the capture preview beside the selection in automatic mode, or
@@ -894,6 +925,22 @@ enum ScreenshotSupport {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
         return "\(prefix) \(formatter.string(from: date)).\(fileExtension)"
+    }
+
+    /// Marks a saved capture the way macOS marks its own screenshots, so
+    /// Spotlight and the Cleaner's forgotten screenshots treat both alike.
+    /// Best effort: an unmarked file is only never offered for cleaning.
+    static func markAsScreenCapture(_ url: URL) {
+        guard let data = try? PropertyListSerialization.data(fromPropertyList: true,
+                                                             format: .binary,
+                                                             options: 0) else { return }
+        url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return }
+            _ = data.withUnsafeBytes {
+                setxattr(path, "com.apple.metadata:kMDItemIsScreenCapture",
+                         $0.baseAddress, data.count, 0, XATTR_NOFOLLOW)
+            }
+        }
     }
 
     /// Writes one drag payload into its own temporary directory. Separate
@@ -2095,8 +2142,8 @@ enum ScreenshotSupport {
         return max(2, Int((CGFloat(base) * BlurStrength.blockFactor(for: level)).rounded()))
     }
 
-    /// The blur levels the pixelate marks use. Each needs a mosaic as large as
-    /// the capture, so the editor keeps no other.
+    /// The blur levels the pixelate marks use. Keep only their sampled mosaics;
+    /// drawing expands each one to the capture size when needed.
     static func mosaicLevels(for annotations: [Annotation]) -> Set<Int> {
         Set(annotations.filter { $0.tool == .pixelate }.map(\.blurLevel))
     }

@@ -185,6 +185,7 @@ final class CommandBarService: ObservableObject {
     private var uninstallSelectionEntries: [CommandBarEntry] = [] { didSet { foldedSections[.uninstallSelection] = nil } }
     private var uninstallSelectionLoading = false
     private var uninstallFinderRequestID: UUID?
+    private var pendingHomebrewRemoval: AppUninstaller.HomebrewRemovalConfirmation?
     /// True while the bar is closing, so nothing is rebuilt on the way out.
     private var isTearingDown = false
     private var menusLoading = false
@@ -2097,7 +2098,8 @@ final class CommandBarService: ObservableObject {
     private func confirmUninstallReview(entryID: String) {
         let uninstaller = AppUninstaller.shared
         guard uninstaller.phase == .results, !uninstaller.isRemoving else { return }
-        if uninstaller.selectedHomebrewPackage != nil {
+        if let confirmation = uninstaller.homebrewRemovalConfirmation {
+            pendingHomebrewRemoval = confirmation
             mode = .uninstallHomebrewConfirm(entryID: entryID)
             refreshPanelLayout()
             return
@@ -2109,7 +2111,10 @@ final class CommandBarService: ObservableObject {
     /// checklist, which shows its live progress the same way the menu panel
     /// already does while `AppUninstaller` waits on it.
     private func confirmUninstallHomebrewRemoval(entryID: String) {
-        AppUninstaller.shared.removeSelectedWithHomebrew()
+        if let confirmation = pendingHomebrewRemoval {
+            AppUninstaller.shared.removeSelectedWithHomebrew(confirmation: confirmation)
+        }
+        pendingHomebrewRemoval = nil
         mode = .uninstallReview(entryID: entryID)
         refreshPanelLayout()
     }
@@ -2938,7 +2943,7 @@ final class CommandBarService: ObservableObject {
 
     /// Borderless panels refuse key status by default, and the bar's field
     /// needs it for typing while the target app stays active.
-    private final class KeyableBarPanel: NSPanel {
+    private final class KeyableBarPanel: OverlayPanel {
         override var canBecomeKey: Bool { true }
     }
 

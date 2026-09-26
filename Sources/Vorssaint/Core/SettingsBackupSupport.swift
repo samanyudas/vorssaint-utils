@@ -23,6 +23,26 @@ enum SettingsBackupSupport {
         return keys
     }
 
+    /// Backups written before Dynamic Island existed have no island keys.
+    /// Importing one must not erase the receiving Mac's island preferences.
+    static func omitsDynamicIslandSettings(_ settings: [String: Any]) -> Bool {
+        dynamicIslandKeys(in: exportKeys()).isDisjoint(with: settings.keys)
+    }
+
+    static func keysToClear(whenImporting settings: [String: Any]) -> Set<String> {
+        let keys = exportKeys()
+        guard omitsDynamicIslandSettings(settings) else { return keys }
+        return keys.subtracting(dynamicIslandKeys(in: keys))
+    }
+
+    private static func dynamicIslandKeys(in keys: Set<String>) -> Set<String> {
+        let availability = Set(AppFeature.features(in: .dynamicIsland).map(\.availabilityKey))
+        return keys.filter {
+            $0.hasPrefix("notch") || $0 == DefaultsKey.panelControlNotch
+                || availability.contains($0)
+        }
+    }
+
     /// Preferences stored without a registered default (absence means "use
     /// the built-in behavior"), still part of how the user set the app up.
     static let unregisteredPreferenceKeys: Set<String> = [
@@ -84,6 +104,7 @@ enum SettingsBackupSupport {
         DefaultsKey.micMuteSavedVolume,
         // Levels and device ids belong to the microphones of one Mac.
         DefaultsKey.micMuteSavedVolumes,
+        DefaultsKey.micMuteSavedChannelVolumes,
         DefaultsKey.micMuteMutedDevices,
         DefaultsKey.cleanerLastAutoRun,
         // When the last check ran and what it found belong to one Mac.
@@ -91,6 +112,7 @@ enum SettingsBackupSupport {
         DefaultsKey.appUpdatesLastCount,
         DefaultsKey.appUpdatesNotifiedIDs,
         DefaultsKey.cleanerLastAutoFreed,
+        DefaultsKey.cleanerLastAutoFailed,
         DefaultsKey.whatsAppDownloadsAutomaticStartDate,
         DefaultsKey.whatsAppDownloadsLastAutoRun,
         DefaultsKey.whatsAppDownloadsLastCleanup,
@@ -115,6 +137,8 @@ enum SettingsBackupSupport {
         // protected-folder prompt without a fresh choice.
         DefaultsKey.commandBarFileScopes,
         DefaultsKey.notchDownloadsFolderBookmark,
+        DefaultsKey.wallpaperOwnBookmarks,
+        DefaultsKey.wallpaperExcludedOwnPaths,
         // A local watermark file is authority on this Mac, not portable data.
         DefaultsKey.mediaImageWatermarkLogoPath,
         DefaultsKey.simulateUpdate,
@@ -125,6 +149,8 @@ enum SettingsBackupSupport {
         DefaultsKey.orphanedCaptureShortcutMigrated,
         DefaultsKey.settingsWindowWidth,
         DefaultsKey.settingsWindowHeight,
+        DefaultsKey.clipboardHistoryWindowWidth,
+        DefaultsKey.clipboardHistoryWindowHeight,
         // The last magnifier level is session history; its remembered/default
         // policy remains portable, but another Mac need not inherit the value.
         DefaultsKey.screenshotLoupeLastZoom,
@@ -144,6 +170,7 @@ enum SettingsBackupSupport {
         // a Mac that still holds its own stale verdicts.
         DefaultsKey.brightnessDDCWriteOnlyPathsRechecked,
         DefaultsKey.brightnessForcedSoftwarePaths,
+        DefaultsKey.brightnessExtendedDimmingPaths,
     ]
 
     /// The file's content: an envelope with the format version, the app
@@ -156,8 +183,10 @@ enum SettingsBackupSupport {
                 settings[key] = value
             }
         }
+        settings = portableNotchDisplay(settings)
         settings = portableMediaSettings(settings)
         settings = portableMouseExceptions(settings)
+        settings = portableWindowLayoutIgnoredApps(settings)
         return [
             formatVersionKey: formatVersion,
             appVersionKey: appVersion,
@@ -175,7 +204,18 @@ enum SettingsBackupSupport {
         else { return nil }
         let allowed = exportKeys()
         let filtered = settings.filter { allowed.contains($0.key) && valueLooksRight($0.key, $0.value) }
-        return portableMouseExceptions(portableMediaSettings(filtered))
+        return portableNotchDisplay(portableWindowLayoutIgnoredApps(
+            portableMouseExceptions(portableMediaSettings(filtered))))
+    }
+
+    /// A display mode this version does not offer, such as one kept by an
+    /// earlier development build, restores as the automatic choice.
+    private static func portableNotchDisplay(_ settings: [String: Any]) -> [String: Any] {
+        var result = settings
+        if let mode = result[DefaultsKey.notchDisplay] as? String, NotchDisplay(rawValue: mode) == nil {
+            result[DefaultsKey.notchDisplay] = NotchDisplay.automatic.rawValue
+        }
+        return result
     }
 
     static func formatVersion(from payload: [String: Any]) -> Int? {
@@ -239,6 +279,17 @@ enum SettingsBackupSupport {
             // An emptied list still means "no exceptions", so the key stays
             // rather than falling back to whatever a missing key would do.
             settings[key] = portable
+        }
+        return settings
+    }
+
+    private static func portableWindowLayoutIgnoredApps(_ source: [String: Any]) -> [String: Any] {
+        var settings = source
+        if let apps = settings[DefaultsKey.windowLayoutIgnoredApps] as? [String] {
+            // Executable paths belong to this Mac; only bundle IDs travel in backups.
+            settings[DefaultsKey.windowLayoutIgnoredApps] = apps.filter {
+                !MouseAppExceptionSupport.isExecutablePathIdentity($0)
+            }
         }
         return settings
     }

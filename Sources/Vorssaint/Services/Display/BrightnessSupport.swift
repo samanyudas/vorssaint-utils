@@ -67,6 +67,13 @@ enum BrightnessSupport {
         return min(lastNonzero, 1)
     }
 
+    /// A slider hands over whatever the drag produced. Nothing but a finite
+    /// value inside the supported range reaches the private setter.
+    static func sliderKeyboardLightLevel(_ level: Float) -> Float? {
+        guard level.isFinite else { return nil }
+        return min(max(level, 0), 1)
+    }
+
     static func steppedKeyboardLightLevel(current: Float, direction: Int) -> Float {
         guard current.isFinite else { return 0 }
         let step = direction < 0 ? -keyboardLightStep : keyboardLightStep
@@ -482,6 +489,26 @@ enum BrightnessSupport {
         let ceiling = sanitizedMaximum(maximum)
         let clamped = min(max(normalized, 0), 1)
         return UInt16((clamped * Double(ceiling)).rounded())
+    }
+
+    /// An optional lower quarter of the slider dims the picture after the
+    /// monitor has reached its own minimum. The rest keeps using its backlight.
+    static let extendedDimmingRange = 0.25
+
+    static func extendedDimmingComponents(for brightness: Double) -> (hardware: Double, picture: Double) {
+        let level = min(max(brightness, 0), 1)
+        if level < extendedDimmingRange {
+            return (0, level / extendedDimmingRange)
+        }
+        return ((level - extendedDimmingRange) / (1 - extendedDimmingRange), 1)
+    }
+
+    static func extendedDimmingLevel(hardware: Double, remembered: Double?, pictureDimmed: Bool) -> Double {
+        let physical = extendedDimmingRange
+            + min(max(hardware, 0), 1) * (1 - extendedDimmingRange)
+        guard pictureDimmed, hardware <= 0.001, let remembered,
+              remembered < extendedDimmingRange else { return physical }
+        return min(max(remembered, 0), extendedDimmingRange)
     }
 
     // MARK: - Display to service matching

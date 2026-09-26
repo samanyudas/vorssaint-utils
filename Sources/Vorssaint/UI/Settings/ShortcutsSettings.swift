@@ -10,6 +10,7 @@ struct ShortcutsSettings: View {
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var features = FeatureRuntime.shared
     @ObservedObject private var superKey = SuperKeyService.shared
+    @ObservedObject private var router = SettingsRouter.shared
     @AppStorage(DefaultsKey.keyboardBrightnessShortcutsEnabled) private var keyboardBrightnessShortcutsEnabled = false
     /// Keyed by group too: brightness has a row in two groups, and each opens on its own.
     @State private var expandedFeatures: [FeatureGroup: Set<AppFeature>] = [.tools: [.screenshot]]
@@ -48,9 +49,6 @@ struct ShortcutsSettings: View {
                     ForEach(featuresWithShortcuts(in: group), id: \.self) { feature in
                         if feature == .screenshot {
                             captureGroupRows
-                        } else if feature == .soundOutputSwitcher {
-                            featureRows(feature, in: group)
-                                .settingsSectionAnchor(.soundOutputSwitcher)
                         } else {
                             featureRows(feature, in: group)
                         }
@@ -73,6 +71,8 @@ struct ShortcutsSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { revealKeyboardBrightnessShortcuts() }
+        .onChange(of: router.requestID) { _, _ in revealKeyboardBrightnessShortcuts() }
         .sheet(isPresented: $showsAppShortcuts) {
             CommandBarAppShortcutsView()
         }
@@ -113,14 +113,11 @@ struct ShortcutsSettings: View {
     @ViewBuilder
     private func featureRows(_ feature: AppFeature, in group: FeatureGroup) -> some View {
         let roles = availableRoles.filter { $0.feature == feature && $0.group == group }
-        let count = feature == .windowLayout ? WindowLayoutAction.shortcutActions.count : roles.count
+        let count = feature == .windowLayout
+            ? WindowLayoutAction.shortcutActions.count + roles.count
+            : roles.count
         if count > 1 {
-            disclosureHeader(
-                title: featureTitle(feature, roles: roles),
-                symbolName: featureSymbol(feature, roles: roles),
-                isActive: featureHasActiveShortcut(feature, roles: roles),
-                count: count,
-                isExpanded: expansionBinding(for: feature, in: group))
+            featureHeader(feature, roles: roles, count: count, in: group)
             if expandedFeatures[group, default: []].contains(feature) {
                 if feature == .windowLayout {
                     ForEach(WindowLayoutAction.shortcutActions) { action in
@@ -133,6 +130,10 @@ struct ShortcutsSettings: View {
                             text: text
                         )
                         .disclosureIndent()
+                    }
+                    ForEach(roles) { role in
+                        roleRow(role, showsFeatureContext: false, reservesClearButtonSpace: true)
+                            .disclosureIndent()
                     }
                 } else {
                     if feature == .brightness, roles.allSatisfy(\.isKeyboardBrightness) {
@@ -152,6 +153,28 @@ struct ShortcutsSettings: View {
         } else if let role = roles.first {
             roleRow(role)
         }
+    }
+
+    @ViewBuilder
+    private func featureHeader(_ feature: AppFeature, roles: [GlobalShortcutRole],
+                               count: Int, in group: FeatureGroup) -> some View {
+        let header = disclosureHeader(
+            title: featureTitle(feature, roles: roles),
+            symbolName: featureSymbol(feature, roles: roles),
+            isActive: featureHasActiveShortcut(feature, roles: roles),
+            count: count,
+            isExpanded: expansionBinding(for: feature, in: group))
+        if feature == .brightness, roles.allSatisfy(\.isKeyboardBrightness) {
+            header.settingsSectionAnchor(.keyboardBrightnessShortcuts)
+        } else {
+            header
+        }
+    }
+
+    private func revealKeyboardBrightnessShortcuts() {
+        guard router.destination == FeatureSettingsDestination(
+            .shortcuts, sectionAnchor: .keyboardBrightnessShortcuts) else { return }
+        expandedFeatures[.mouseKeyboard, default: []].insert(.brightness)
     }
 
     private func featureTitle(_ feature: AppFeature, roles: [GlobalShortcutRole]) -> String {
@@ -190,7 +213,8 @@ struct ShortcutsSettings: View {
     }
 
     private func roleRow(_ role: GlobalShortcutRole,
-                         showsFeatureContext: Bool = true) -> some View {
+                         showsFeatureContext: Bool = true,
+                         reservesClearButtonSpace: Bool = false) -> some View {
         let title = role.title(l10n.s)
         let featureTitle = role.feature.hubTitle(l10n.s, hub: hub)
         let active = role.requiredEnableKeys.allSatisfy {
@@ -207,6 +231,7 @@ struct ShortcutsSettings: View {
             showsSuperKeyAlternative: superKey.isRunning,
             superKeyModifiers: superKey.modifiers,
             includeInactiveConflicts: true,
+            reservesClearButtonSpace: reservesClearButtonSpace,
             additionalConflict: { shortcut in
                 guard AppFeature.windowLayout.isAvailable else { return nil }
                 return WindowLayoutService.shared.shortcutConflictTitle(shortcut, excluding: nil)
@@ -231,9 +256,10 @@ struct ShortcutsSettings: View {
 
     private func featureHasActiveShortcut(_ feature: AppFeature,
                                           roles: [GlobalShortcutRole]) -> Bool {
-        if feature == .windowLayout {
-            return UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutShortcutsEnabled)
-                && WindowLayoutAction.shortcutActions.contains { $0.savedShortcut != nil }
+        if feature == .windowLayout,
+           UserDefaults.standard.bool(forKey: DefaultsKey.windowLayoutShortcutsEnabled),
+           WindowLayoutAction.shortcutActions.contains(where: { $0.savedShortcut != nil }) {
+            return true
         }
         return roles.contains { role in
             role.requiredEnableKeys.allSatisfy { UserDefaults.standard.bool(forKey: $0) }

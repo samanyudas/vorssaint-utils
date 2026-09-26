@@ -14,6 +14,7 @@ enum ScreenshotShareCompletionTests {
     }
 
     class State {
+        var systemSharing = false
         var pointerInside = false
         var onClose: () -> Void = {}
         var shareHandler: ((ScreenshotShareDuration, @escaping @MainActor (ScreenshotShareRecord?) -> Void) -> Void)?
@@ -65,6 +66,28 @@ enum ScreenshotShareCompletionTests {
         static func load() -> Int? { 1 }
     }
 
+    enum ScreenshotSelectionController {
+        typealias Capture = Int
+    }
+
+    final class ScreenshotEditorController {
+        let capture: Int
+        var shown = false
+        init(capture: Int) { self.capture = capture }
+        func show() { shown = true }
+    }
+
+    enum WindowActivationPolicy {
+        static var retained = 0
+        static func retain() { retained += 1 }
+        static func release() { retained -= 1 }
+    }
+
+    enum NSSound {
+        static var beeps = 0
+        static func beep() { beeps += 1 }
+    }
+
     enum QuickToolHUD {
         static func show(icon: String, message: String) {}
     }
@@ -78,7 +101,7 @@ enum ScreenshotShareCompletionTests {
         var uploadingLatestCapture = false
         var latestCaptureID = UUID()
         var linkCopyRetry = ScreenshotLinkCopyRetry()
-        var hasLatestCaptureEditor = false
+        var editors: [ScreenshotEditorController] = []
         var preview: ScreenshotQuickPreviewController?
         var completion: (@MainActor (ScreenshotShareRecord?) -> Void)?
         var uploads = 0
@@ -270,14 +293,35 @@ enum ScreenshotShareCompletionTests {
         service.records = [record]
         service.copies = []
         let editing = Uploader()
-        editing.hasLatestCaptureEditor = true
+        editing.openEditor(with: 1)
+        editing.openEditor(with: 2)
+        suite.expect(editing.editors.allSatisfy { $0.shown }, "editors are tracked when shown")
+        NSSound.beeps = 0
         editing.linkCopyRetry.remember(record, for: editing.latestCaptureID)
         editing.uploadLastCapture()
         suite.expect(editing.uploads == 0 && service.copies.isEmpty,
                      "shortcut never uploads or copies the stored original while its editor is open")
 
+        suite.expect(NSSound.beeps == 1, "blocked cached-link press beeps")
+        editing.linkCopyRetry.clear()
+        editing.uploadLastCapture()
+        suite.expect(editing.uploads == 0 && NSSound.beeps == 2,
+                     "clipboard or history editor blocks the raw upload with feedback")
+        let firstEditor = editing.editors[0]
+        editing.editorDidClose(firstEditor)
+        editing.editorDidClose(firstEditor)
+        suite.expect(editing.editors.count == 1, "duplicate close preserves the remaining editor")
+        editing.latestCaptureID = UUID()
+        editing.uploadLastCapture()
+        suite.expect(editing.uploads == 0 && NSSound.beeps == 3,
+                     "remaining editor blocks upload even after a newer capture")
+        editing.editorDidClose(editing.editors[0])
+        editing.uploadLastCapture()
+        suite.expect(editing.uploads == 1 && NSSound.beeps == 3,
+                     "stored upload resumes after the final editor closes")
+
         let editingWithHistory = Uploader()
-        editingWithHistory.hasLatestCaptureEditor = true
+        editingWithHistory.openEditor(with: 1)
         _ = editingWithHistory.showPreview(capture: 2)
         editingWithHistory.uploadLastCapture()
         suite.expect(editingWithHistory.uploadedCaptures == [2],
