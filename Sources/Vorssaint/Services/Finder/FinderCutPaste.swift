@@ -3,6 +3,7 @@
 
 import AppKit
 import ApplicationServices
+import AudioToolbox
 import Combine
 import CoreGraphics
 import SwiftUI
@@ -82,6 +83,15 @@ final class FinderCutPaste: ObservableObject {
     private static let finderBundleID = "com.apple.finder"
     private static let syntheticPasteMarker: Int64 = 0x564F5249
     private static let maxRawImageBytes = 64 * 1024 * 1024
+    // Finder plays this file when a copy finishes. As a system sound it uses the
+    // Sound Effects output and alert volume, and stays silent when user
+    // interface sound effects are off, like Finder's own.
+    private static let feedbackSound: SystemSoundID? = {
+        var id: SystemSoundID = 0
+        let url = URL(fileURLWithPath: "/System/Library/Components/CoreAudio.component/Contents/"
+                      + "SharedSupport/SystemSounds/system/Volume Mount.aif") as CFURL
+        return AudioServicesCreateSystemSoundID(url, &id) == noErr ? id : nil
+    }()
 
     // ANSI virtual key codes.
     private enum Key {
@@ -106,8 +116,7 @@ final class FinderCutPaste: ObservableObject {
         cutPasteEnabled = available
             && UserDefaults.standard.bool(forKey: DefaultsKey.finderCutPasteEnabled)
         showHUD = UserDefaults.standard.object(forKey: DefaultsKey.finderCutPasteShowHUD) as? Bool ?? true
-        playSound = UserDefaults.standard.object(forKey: DefaultsKey.finderCutPastePlaySound) as? Bool
-            ?? FinderCutPasteSoundSupport.defaultEnabled
+        playSound = UserDefaults.standard.bool(forKey: DefaultsKey.finderCutPastePlaySound)
         pasteImageAsFileEnabled = available
             && UserDefaults.standard.bool(forKey: DefaultsKey.finderPasteImageAsFile)
         if SessionActivitySupport.tapShouldRun(featureWanted: cutPasteEnabled || pasteImageAsFileEnabled,
@@ -481,9 +490,6 @@ final class FinderCutPaste: ObservableObject {
         markedChangeCount = pb.changeCount
         lastResult = nil
         refreshPanel()
-        FinderCutPasteSoundSupport.playIfNeeded(
-            FinderCutPasteSoundSupport.shouldPlayOnCut(preferenceEnabled: playSound,
-                                                       markedCount: marked.count))
     }
 
     // MARK: - Paste (move)
@@ -643,9 +649,9 @@ final class FinderCutPaste: ObservableObject {
         lastResult = MoveResult(moved: moved, failed: failed)
         refreshPanel()
         scheduleResultDismiss()
-        FinderCutPasteSoundSupport.playIfNeeded(
-            FinderCutPasteSoundSupport.shouldPlayOnPaste(preferenceEnabled: playSound,
-                                                         movedCount: moved))
+        if playSound, moved > 0, let sound = Self.feedbackSound {
+            AudioServicesPlaySystemSound(sound)
+        }
     }
 
     private enum MoveOutcome {

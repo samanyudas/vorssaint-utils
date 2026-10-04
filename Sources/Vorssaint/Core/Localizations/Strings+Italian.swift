@@ -279,7 +279,7 @@ extension Strings {
         cutPasteShowHUD: "Mostra pannello mobile",
         cutPasteShowHUDCaption: "Mostra un indicatore mobile con i file tagliati mentre il Finder è attivo.",
         cutPastePlaySound: "Riproduci feedback sonoro",
-        cutPastePlaySoundCaption: "Riproduce il suono di sistema Pop di macOS quando i file vengono tagliati o spostati correttamente.",
+        cutPastePlaySoundCaption: "Riproduce il suono di copia dei file del Finder quando ⌘V sposta i file tagliati. Non viene riprodotto se gli effetti sonori dell’interfaccia sono disattivati nelle impostazioni Suono.",
         cutPasteHowTitle: "Come si usa",
         cutPasteStep1: "Seleziona elementi nel Finder e premi ⌘X per tagliarli.",
         cutPasteStep2: "Apri la cartella di destinazione e premi ⌘V per spostarli lì.",

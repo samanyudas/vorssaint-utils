@@ -279,7 +279,7 @@ extension Strings {
         cutPasteShowHUD: "Afficher le panneau flottant",
         cutPasteShowHUDCaption: "Affiche un indicateur flottant avec les fichiers coupés lorsque le Finder est actif.",
         cutPastePlaySound: "Lire un retour sonore",
-        cutPastePlaySoundCaption: "Joue le son système Pop de macOS lorsque des fichiers sont coupés ou déplacés avec succès.",
+        cutPastePlaySoundCaption: "Joue le son de copie de fichiers du Finder lorsque ⌘V déplace les fichiers coupés. Reste silencieux si les effets sonores de l’interface sont désactivés dans les réglages Son.",
         cutPasteHowTitle: "Comment l’utiliser",
         cutPasteStep1: "Sélectionnez des éléments dans le Finder et appuyez sur ⌘X pour les couper.",
         cutPasteStep2: "Ouvrez le dossier de destination et appuyez sur ⌘V pour les y déplacer.",

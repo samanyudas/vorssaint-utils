@@ -279,7 +279,7 @@ extension Strings {
         cutPasteShowHUD: "显示浮动面板",
         cutPasteShowHUDCaption: "访达处于活跃状态时，显示包含已剪切文件的浮动提示。",
         cutPastePlaySound: "播放声音反馈",
-        cutPastePlaySoundCaption: "剪切或成功移动文件时播放 macOS 系统声音 Pop。",
+        cutPastePlaySoundCaption: "按下 ⌘V 移动已剪切的文件时，播放访达拷贝文件的音效。如果在“声音”设置中关闭了用户界面音效，则不会播放。",
         cutPasteHowTitle: "使用方法",
         cutPasteStep1: "在访达中选择项目，按 ⌘X 将其剪切。",
         cutPasteStep2: "打开目标文件夹，按 ⌘V 将其移动到那里。",

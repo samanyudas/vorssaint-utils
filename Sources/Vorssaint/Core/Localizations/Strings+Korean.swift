@@ -280,7 +280,7 @@ extension Strings {
         cutPasteShowHUD: "플로팅 패널 표시",
         cutPasteShowHUDCaption: "Finder가 활성화되어 있는 동안 잘라낸 파일이 담긴 플로팅 표시를 띄웁니다.",
         cutPastePlaySound: "소리 피드백 재생",
-        cutPastePlaySoundCaption: "파일을 잘라내거나 성공적으로 이동할 때 macOS 시스템 사운드 Pop을 재생합니다.",
+        cutPastePlaySoundCaption: "⌘V로 잘라낸 파일을 이동할 때 Finder의 파일 복사 사운드를 재생합니다. 사운드 설정에서 사용자 인터페이스 사운드 효과가 꺼져 있으면 재생되지 않습니다.",
         cutPasteHowTitle: "사용 방법",
         cutPasteStep1: "Finder에서 항목을 선택하고 ⌘X를 눌러 잘라냅니다.",
         cutPasteStep2: "대상 폴더를 열고 ⌘V를 눌러 그곳으로 이동합니다.",

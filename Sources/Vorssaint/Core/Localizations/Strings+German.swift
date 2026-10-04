@@ -279,7 +279,7 @@ extension Strings {
         cutPasteShowHUD: "Schwebendes Fenster anzeigen",
         cutPasteShowHUDCaption: "Zeigt eine schwebende Anzeige mit den ausgeschnittenen Dateien, während der Finder aktiv ist.",
         cutPastePlaySound: "Soundfeedback abspielen",
-        cutPastePlaySoundCaption: "Spielt den macOS-Systemton Pop ab, wenn Dateien ausgeschnitten oder erfolgreich verschoben werden.",
+        cutPastePlaySoundCaption: "Spielt den Kopierton des Finder ab, wenn ⌘V die ausgeschnittenen Dateien bewegt. Bleibt stumm, wenn die Toneffekte der Benutzeroberfläche in den Ton-Einstellungen ausgeschaltet sind.",
         cutPasteHowTitle: "So geht’s",
         cutPasteStep1: "Wähle Objekte im Finder aus und drücke ⌘X, um sie auszuschneiden.",
         cutPasteStep2: "Öffne den Zielordner und drücke ⌘V, um sie dorthin zu bewegen.",
