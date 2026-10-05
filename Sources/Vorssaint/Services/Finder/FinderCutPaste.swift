@@ -538,6 +538,7 @@ final class FinderCutPaste: ObservableObject {
                 finishedBytes += plan.sizes[index] ?? 0
                 switch outcome {
                 case .moved: moved += 1
+                case .unchanged: break
                 case .failed: failed += 1
                 case .needsPrivileges:
                     refused.append(src)
@@ -656,6 +657,7 @@ final class FinderCutPaste: ObservableObject {
 
     private enum MoveOutcome {
         case moved
+        case unchanged
         case failed
         case needsPrivileges
     }
@@ -665,9 +667,8 @@ final class FinderCutPaste: ObservableObject {
     /// folder), so the caller can watch the destination grow.
     private static func move(_ src: URL, into dir: URL, fm: FileManager,
                              willCopy: (URL) -> Void = { _ in }) -> MoveOutcome {
-        // A no-op move (already in the destination) counts as success.
         if src.deletingLastPathComponent().standardizedFileURL.path == dir.standardizedFileURL.path {
-            return .moved
+            return .unchanged
         }
         guard fm.fileExists(atPath: src.path) else { return .failed }
         let dest = uniqueDestination(for: src.lastPathComponent, in: dir, fm: fm)
