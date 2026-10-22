@@ -1262,6 +1262,18 @@ enum ScreenshotFeatureTests {
         suite.expect(!fullScreenClickHost.passesThrough
                 && fullScreenClickHost.acceptsFirstMouse(for: nil),
                "the interactive full-screen host receives its first click while Dynamic Island owns key focus")
+        let buttonSize = fullScreenClickHost.fittingSize
+        suite.expect(buttonSize.width > 1 && buttonSize.height > 0,
+               "the full-screen button retains a measurable size instead of collapsing to one point")
+        let fixedGuideHost = PassThroughHostingView(fixedFrameRootView: Text("Screenshot"))
+        let guideFrame = CGRect(x: 100, y: 100, width: 620, height: 146)
+        fixedGuideHost.frame = guideFrame
+        for title in ["Record screen", "Pick color", "Screenshot"] {
+            fixedGuideHost.rootView = Text(title)
+            fixedGuideHost.layoutSubtreeIfNeeded()
+            suite.expect(fixedGuideHost.frame == guideFrame && fixedGuideHost.sizingOptions.isEmpty,
+                   "changing the capture guide leaves its assigned frame intact")
+        }
         suite.expect(ScreenshotSupport.offersRepeatLastRegion(isPickingColor: false,
                                                         storedRegionDisplayIsAvailable: true),
                "the repeat hint is offered once a region is stored on a display still in the session")
@@ -1274,6 +1286,11 @@ enum ScreenshotFeatureTests {
         let captureSelectionSource = (try? String(
             contentsOfFile: "Sources/Vorssaint/Services/QuickTools/ScreenshotSelectionController.swift",
             encoding: .utf8)) ?? ""
+        suite.expect(captureSelectionSource.contains(
+            "PassThroughHostingView(fixedFrameRootView: CaptureGuideView(")
+                && captureSelectionSource.contains(
+                    "PassThroughHostingView(interactiveRootView: FullScreenCaptureButton("),
+               "only the manually sized capture guide opts out of intrinsic hosting size")
         suite.expect(captureSelectionSource.contains(
             "override func mouseExited(with event: NSEvent) {\n        refreshPointerState()\n        refreshGuideVisibility()"),
                "system chrome cannot hide the capture chooser while the pointer remains on its display")
@@ -1404,6 +1421,42 @@ enum ScreenshotFeatureTests {
             .components(separatedBy: "\n}").first ?? ""
         suite.expect(overlayViewBody.contains("acceptsFirstMouse") && overlayViewBody.contains("acceptsFirstMouse(for event: NSEvent?) -> Bool { true }"),
                "the capture surface claims the first click so a drag works while Dynamic Island holds key focus")
+        // The other half of that drag: live, the panel is clear and draws no
+        // dim over the desktop until the drag starts, and a window left at the
+        // default passes a press on a transparent pixel through to the desktop.
+        // A session can start live, so the assignment must be a statement of
+        // the initializer itself, not a branch or a later update, and nothing
+        // in the class may set the property to true.
+        let overlayPanelBody = selectionSource.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+            .components(separatedBy: "class ScreenshotOverlayPanel").dropFirst().first?
+            .components(separatedBy: "\n}").first ?? ""
+        let overlayPanelInit = overlayPanelBody.components(separatedBy: "super.init(contentRect:").dropFirst().first?
+            .components(separatedBy: "\n    }").first ?? ""
+        suite.expect(overlayPanelInit.components(separatedBy: "\n").contains("        ignoresMouseEvents = false")
+                && !overlayPanelBody.contains("ignoresMouseEvents = true"),
+               "the clear capture surface takes a press over the bare desktop instead of passing it through")
+        // Taking every press lasts until the window is really gone, and AppKit
+        // fades the panel out after `orderOut`, so a quick click or the first
+        // scroll after a capture landed on the leaving panel. Every path that
+        // orders the panels out goes through the retire step, which lets go of
+        // the mouse and flushes that to the window server before they leave.
+        let selectionCode = selectionSource.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
+        func selectionMethod(_ signature: String) -> String {
+            selectionCode.components(separatedBy: signature).dropFirst().first?
+                .components(separatedBy: "\n    }").first ?? ""
+        }
+        let retireBody = selectionMethod("private func retirePanels()")
+        let retireSteps = ["$0.ignoresMouseEvents = true", "CATransaction.flush()", "$0.orderOut(nil)"]
+            .compactMap { retireBody.range(of: $0)?.lowerBound }
+        suite.expect(retireSteps.count == 3 && retireSteps == retireSteps.sorted()
+                && selectionCode.components(separatedBy: "orderOut(").count == 2
+                && selectionMethod("private func captureLive(").contains("retirePanels()")
+                && selectionMethod("private func finish(").contains("retirePanels()"),
+               "a capture surface leaving the screen stops taking the mouse before its fade")
         // Both editors state a size the same way. The recorder wrote
         // "1960x1274" beside a screenshot editor that already read
         // "2940 \u{00D7} 1912 px", and the letter x is the tell.
