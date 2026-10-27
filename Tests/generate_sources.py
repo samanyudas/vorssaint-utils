@@ -1274,6 +1274,12 @@ def main():
               "    private func handleScreenEdgeEvent(", "    private func handleScreenEdgeClick(",
               "    private func removeScreenEdgeClickMonitors("])
           + "}\n}\n")
+    write("NotchClickElsewhere.swift", "import AppKit\nextension NotchClickElsewhereTests {\nfinal class Service: State {\n"
+          + declaration(notch, "    private func clickedElsewhere(").replace("    private ", "    ", 1)
+          + "}\nfinal class Preview: PreviewState {\n"
+          + declaration("Sources/Vorssaint/Services/QuickTools/ScreenshotQuickPreviewController.swift",
+                        "    private func dismissForClickElsewhere(").replace("    private ", "    ", 1)
+          + "}\n}\n")
     write("NotchScreenRefresh.swift", "import Foundation\n\nextension NotchScreenRefreshContract {\nfinal class Service: State {\n"
           + declaration(notch, "    private func schedulePreferenceSync()").replace("private func", "func", 1)
           + declaration(notch, "    private func screenParametersDidChange()").replace("private func", "func", 1)
@@ -1321,6 +1327,7 @@ def main():
           + "}\n}\n")
     write("NotchKeyMonitor.swift", "import Foundation\nextension NotchKeyMonitorTests {\nfinal class Service: State {\n"
           + declaration(notch, "    private func installEventMonitors()").replace("private func", "func", 1)
+          + declaration(notch, "    private func clickedElsewhere()").replace("private func", "func", 1)
           + "}\n}\n")
     write("NotchCommandBarHeight.swift", "import Foundation\nextension NotchCommandBarHeightTests {\nfinal class Service: State {\n"
           + declaration(notch, "    fileprivate func commandBarDidClose()").replace("fileprivate func", "func", 1)

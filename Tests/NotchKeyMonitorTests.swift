@@ -68,7 +68,8 @@ enum NotchKeyMonitorTests {
         var eventMonitors: [Any] = []
         var clickedSinceOpening = false
         var showsKeyboardFocus = false
-        var keepsWorkingSurface = false
+        var keepsSurfaceOnClick = false, showsCapturePreview = false
+        var captureDismiss: (() -> Void)?
         let panel: Panel? = Panel()
         var windowHost: Host? = Host()
         var captureControls: Int?
