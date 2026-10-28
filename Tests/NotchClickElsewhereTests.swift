@@ -20,7 +20,12 @@ enum NotchClickElsewhereTests {
         var underPointer = false
         func contains(_ point: CGPoint) -> Bool { underPointer }
     }
+    final class Mirror {
+        final class Model { var shown = true }
+        let model = Model(), host = Host()
+    }
     class State {
+        var mirrors: [Int: Mirror] = [:]
         var keepsSurfaceOnClick = false, showsCapturePreview = false
         var windowHost: Host? = Host()
         var collapses = 0, dismissals = 0
@@ -59,6 +64,20 @@ enum NotchClickElsewhereTests {
             suite.expect(service.collapses == 0 && service.dismissals == 0,
                          "pinning, menus, sheets, the island's own area, the status item and the assistive keyboard keep the island")
         }
+
+        let mirror = Mirror()
+        mirror.host.underPointer = true
+        let copiedIsland = clicked { $0.showsCapturePreview = true; $0.mirrors[1] = mirror }
+        suite.expect(copiedIsland.dismissals == 0 && copiedIsland.collapses == 0,
+                     "clicking a visible island copy preserves the preview while it moves between displays")
+        mirror.model.shown = false
+        let hiddenCopy = clicked { $0.showsCapturePreview = true; $0.mirrors[1] = mirror }
+        suite.expect(hiddenCopy.dismissals == 1,
+                     "a hidden island copy does not block an outside click at its old position")
+        mirror.model.shown = true
+        mirror.host.underPointer = false
+        let outsideCopy = clicked { $0.showsCapturePreview = true; $0.mirrors[1] = mirror }
+        suite.expect(outsideCopy.dismissals == 1, "a click outside every visible island dismisses the preview")
 
         let controller = Preview()
         controller.model.sharing = true
